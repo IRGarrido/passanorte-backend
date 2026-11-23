@@ -52,14 +52,14 @@ def _serialise(visit: Visit) -> dict:
     }
 
 
-@router.post("/visits", status_code=status.HTTP_201_CREATED)
+@router.post("/visits", status_code=status.HTTP_201_CREATED, response_model=None)
 def mark_visit(
     payload: VisitCreate,
     claims: dict = Depends(get_current_user),
     snapshot_for: Callable = Depends(get_catalog_snapshot),
     propagate: Callable = Depends(get_propagator),
     db: Session = Depends(get_db),
-) -> dict:
+) -> dict | JSONResponse:
     """Marcar visitação: Haversine contra o raio do ponto (RF31–RF33, D-10)."""
     if claims.get("role") != "tourist":
         raise ApiError(code="forbidden", message="Apenas turistas registram visitações.", status_code=403)

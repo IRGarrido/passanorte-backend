@@ -39,6 +39,12 @@ services:
           - "~/api/v1/tourists/?$"
           - "~/api/v1/session/refresh/?$"
           - "~/api/v1/session/?$"
+      # O corpo do logout autentica com refresh token; n?o requer access ainda v?lido.
+      - name: auth-logout
+        methods: [DELETE]
+        regex_priority: 100
+        strip_path: false
+        paths: ["~/api/v1/session/?$"]
       # autenticado: todo o resto de /tourists /session /me /employees
       - name: auth-api
         strip_path: false
@@ -47,8 +53,10 @@ services:
         plugins:
           - name: jwt
             config:
-              key_claim_name: iss
+              key_claim_name: kid
               claims_to_verify: [exp]
+              uri_param_names: []
+              cookie_names: []
               run_on_preflight: false
 
   - name: catalog
@@ -79,8 +87,10 @@ services:
         plugins:
           - name: jwt
             config:
-              key_claim_name: iss
+              key_claim_name: kid
               claims_to_verify: [exp]
+              uri_param_names: []
+              cookie_names: []
               run_on_preflight: false
 
   - name: validation
@@ -96,8 +106,10 @@ services:
         plugins:
           - name: jwt
             config:
-              key_claim_name: iss
+              key_claim_name: kid
               claims_to_verify: [exp]
+              uri_param_names: []
+              cookie_names: []
               run_on_preflight: false
 
   - name: gamification
@@ -121,8 +133,10 @@ services:
         plugins:
           - name: jwt
             config:
-              key_claim_name: iss
+              key_claim_name: kid
               claims_to_verify: [exp]
+              uri_param_names: []
+              cookie_names: []
               run_on_preflight: false
 
   - name: insights
@@ -138,8 +152,10 @@ services:
         plugins:
           - name: jwt
             config:
-              key_claim_name: iss
+              key_claim_name: kid
               claims_to_verify: [exp]
+              uri_param_names: []
+              cookie_names: []
               run_on_preflight: false
 
   - name: notifications
@@ -155,8 +171,10 @@ services:
         plugins:
           - name: jwt
             config:
-              key_claim_name: iss
+              key_claim_name: kid
               claims_to_verify: [exp]
+              uri_param_names: []
+              cookie_names: []
               run_on_preflight: false
 
   - name: chatbot
@@ -172,22 +190,14 @@ services:
         plugins:
           - name: jwt
             config:
-              key_claim_name: iss
+              key_claim_name: kid
               claims_to_verify: [exp]
+              uri_param_names: []
+              cookie_names: []
               run_on_preflight: false
 
 # ---------------------------------------------------------------------------
-# Consumer + credencial JWT: o plugin jwt procura a credencial cuja `key`
-# aparece no claim `iss` do token (key_claim_name: iss) e valida a assinatura
-# HS256 com `secret`. key deve == JWT_ISSUER; secret deve == JWT_SECRET.
-# ---------------------------------------------------------------------------
-consumers:
-  - username: passanorte-edge
-    jwt_secrets:
-      - algorithm: HS256
-        key: __JWT_ISSUER__
-        secret: __JWT_SECRET__
-
+# RS256 credentials are appended from public key files by entrypoint-render.sh.
 # ---------------------------------------------------------------------------
 # Plugins globais.
 # ---------------------------------------------------------------------------

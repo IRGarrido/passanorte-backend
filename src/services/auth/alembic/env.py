@@ -1,18 +1,17 @@
 """Alembic env do serviço auth (migrações por serviço, Princípio I)."""
-import os
 from logging.config import fileConfig
 
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
 from services.auth.app import models  # noqa: F401  (registra as tabelas)
-from shared.db import Base
+from shared.db import Base, database_url
 
 config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-config.set_main_option("sqlalchemy.url", os.environ.get("DATABASE_URL", "sqlite:///./dev.db"))
+config.set_main_option("sqlalchemy.url", database_url().replace("%", "%%"))
 target_metadata = Base.metadata
 
 

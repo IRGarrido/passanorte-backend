@@ -7,14 +7,9 @@ Deve falhar antes de T045/T046.
 
 from __future__ import annotations
 
-import os
-
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.pool import StaticPool
-
-os.environ.setdefault("JWT_SECRET", "test-secret-32-bytes-for-hs256-00")
-os.environ.setdefault("PII_ENCRYPTION_KEY", "MgBPF0RbsIxVX4Vi5ZCp0P5ylutyWhnhSeB_9xIrsMY=")
 
 from services.gamification.app.core import completion as completion_mod  # noqa: E402
 from services.gamification.app.core import redemptions as redemptions_mod  # noqa: E402

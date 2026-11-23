@@ -71,7 +71,7 @@ def list_spots(
 ) -> TouristSpotList:
     query = _spot_query(db)
     if claims_user:
-        notify_access(claims_user.get("sub"))  # RF07: acesso registrado no insights (D-05)
+        notify_access(claims_user["sub"])  # RF07: acesso registrado no insights (D-05)
     if status:
         query = query.filter(TouristSpot.status == SpotStatus(status))
     if category:

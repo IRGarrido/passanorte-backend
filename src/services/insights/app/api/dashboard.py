@@ -7,6 +7,7 @@ Agregações SQL sobre os fatos locais; consulta nunca sai do banco do serviço
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from typing import SupportsFloat, cast
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func
@@ -42,8 +43,8 @@ def heatmap(
         {
             "tourist_spot_id": spot_id,
             "name": name,
-            "lat": float(lat) if lat is not None else None,
-            "lng": float(lng) if lng is not None else None,
+            "lat": float(cast(SupportsFloat, lat)) if lat is not None else None,
+            "lng": float(cast(SupportsFloat, lng)) if lng is not None else None,
             "visit_count": count,
             "weight": round(count / total, 4),
         }

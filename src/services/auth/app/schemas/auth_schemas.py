@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, EmailStr, Field
+from typing import Annotated
+
+from pydantic import AfterValidator, BaseModel, EmailStr, Field
+
+from shared.security import validate_password
 
 
 class TouristCreate(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     surname: str = Field(min_length=1, max_length=120)
     email: EmailStr
-    password: str = Field(min_length=8)
+    password: Annotated[str, AfterValidator(validate_password)] = Field(min_length=8)
     phone: str = Field(min_length=5, max_length=40)
     country_of_origin: str = Field(min_length=2, max_length=120)
     cpf: str | None = Field(default=None, description="Cadastro único por CPF ou passaporte (RF22)")

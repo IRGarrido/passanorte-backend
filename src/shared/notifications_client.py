@@ -24,7 +24,8 @@ def dispatch(
     payload: dict | None = None,
 ) -> None:
     """Publica um evento `notification.dispatch` por alvo (idempotente no consumer)."""
-    for category_id in category_ids or [None]:
+    targets: list[str | None] = list(category_ids) if category_ids else [None]
+    for category_id in targets:
         message: dict = {
             "kind": kind,
             "source_id": source_id,

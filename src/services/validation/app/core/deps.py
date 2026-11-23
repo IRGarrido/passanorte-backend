@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from collections.abc import Callable, Generator
 
 import httpx
@@ -12,13 +11,13 @@ from sqlalchemy.orm import Session
 
 from shared.errors import ApiError
 from shared.security import decode_token
+from shared.settings import Settings
 
 
 def get_db() -> Generator[Session, None, None]:
-    from shared.db import create_service_engine, make_session_factory
+    from shared.db import service_session_factory
 
-    engine = create_service_engine()
-    factory = make_session_factory(engine)
+    factory = service_session_factory()
     session = factory()
     try:
         yield session
@@ -38,7 +37,7 @@ def get_current_user(request: Request) -> dict:
 
 def get_catalog_snapshot() -> Callable[[str], dict]:
     """Fetcher do snapshot do ponto no catalog (substituível em testes)."""
-    base_url = os.environ.get("CATALOG_SERVICE_URL", "http://localhost:8002")
+    base_url = str(Settings.load().catalog_service_url).rstrip("/")
 
     def fetch(spot_id: str) -> dict:
         try:

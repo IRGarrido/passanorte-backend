@@ -8,13 +8,8 @@ entrega-as ao handler do notifications ("fast-forward do broker").
 
 from __future__ import annotations
 
-import os
-
 import pytest
 from fastapi.testclient import TestClient
-
-os.environ.setdefault("JWT_SECRET", "test-secret-32-bytes-for-hs256-00")
-os.environ.setdefault("PII_ENCRYPTION_KEY", "MgBPF0RbsIxVX4Vi5ZCp0P5ylutyWhnhSeB_9xIrsMY=")
 
 from services.auth.app.core import deps as auth_deps  # noqa: E402
 from services.auth.app.main import create_test_app as auth_factory  # noqa: E402

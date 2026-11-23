@@ -4,13 +4,9 @@ admin: acesso total; employee: apenas concessão de benefícios;
 tourist: apenas /me*. Falha antes da implementação de T027/T028.
 """
 
-import os
 
 import pytest
 from fastapi.testclient import TestClient
-
-os.environ.setdefault("JWT_SECRET", "test-secret-32-bytes-for-hs256-00")
-os.environ.setdefault("PII_ENCRYPTION_KEY", "MgBPF0RbsIxVX4Vi5ZCp0P5ylutyWhnhSeB_9xIrsMY=")
 
 from services.auth.app.api import employees, session  # noqa: E402
 from services.auth.app.core import deps as auth_deps  # noqa: E402

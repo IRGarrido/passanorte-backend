@@ -8,44 +8,42 @@ o ciclo de vida do barramento AMQP (RabbitMQ).
 from __future__ import annotations
 
 import logging
-import os
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import FastAPI
+from fastapi import APIRouter, FastAPI
 from fastapi.openapi.utils import get_openapi
 
 from shared import messaging
 from shared.errors import install_error_handlers
 from shared.logging import CorrelationIdMiddleware, configure_logging, log_event
+from shared.settings import validate_service
 
 
 def create_app(
     service_name: str,
     include_in_schema: bool = True,
-    routers: list[Callable[..., Any]] | None = None,
+    routers: list[APIRouter] | None = None,
     consumers: list[messaging.ConsumerSpec] | None = None,
 ) -> FastAPI:
-    """Cria o app FastAPI do serviço com padrões transversais aplicados.
+    """Create a service with APIRouter instances and validated settings.
 
-    `routers` são objetos FastAPI APIRouter; a lista aceita routers já
-    construídos (instâncias APIRouter) ou callables que os retornam.
-    `consumers` registra consumers do barramento AMQP, iniciados no
-    lifespan (sem `RABBITMQ_URL`, o broker fica degradado e nada roda).
-    O `/health` continua liveness-only — nunca faz ping do banco/broker,
-    porque os healthchecks do compose e do Kong dependem dele.
+    Broker configuration is mandatory outside tests. Health remains liveness-only.
     """
     configure_logging(service_name)
     logger = logging.getLogger(service_name)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-        messaging.configure(os.environ.get("RABBITMQ_URL", ""))
+        settings = validate_service(service_name)
+        messaging.configure(settings.rabbitmq_url.get_secret_value())
         if consumers:
             messaging.start_consumers(consumers)
-        yield
-        messaging.stop()
+        try:
+            yield
+        finally:
+            messaging.stop()
 
     app = FastAPI(
         title=f"PassaNorte — {service_name}",
