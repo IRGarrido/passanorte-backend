@@ -139,7 +139,7 @@ def update_spot(
         value = getattr(payload, field, None)
         if value is not None:
             setattr(spot, field, value)
-    if getattr(payload, "category_ids", None) is not None:
+    if payload.category_ids is not None:
         db.query(SpotCategory).filter(SpotCategory.spot_id == spot_id).delete()
         for category_id in payload.category_ids:
             db.add(SpotCategory(spot_id=spot_id, category_id=category_id))

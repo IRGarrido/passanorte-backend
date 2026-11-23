@@ -9,24 +9,57 @@ eventos capturados aos handlers do serviço alvo — "fast-forward do broker".
 
 from __future__ import annotations
 
+import atexit
 import os
+import secrets
 import sys
+import tempfile
 from collections.abc import Iterator
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pytest
+from cryptography.fernet import Fernet
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
 from sqlalchemy.orm import Session
 
 sys.path.insert(0, "src")
 
-os.environ.setdefault("JWT_SECRET", "test-secret-32-bytes-for-hs256-00")
-os.environ.setdefault("PII_ENCRYPTION_KEY", "MgBPF0RbsIxVX4Vi5ZCp0P5ylutyWhnhSeB_9xIrsMY=")
+
+_test_keys = tempfile.TemporaryDirectory()
+atexit.register(_test_keys.cleanup)
+_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+_key_dir = Path(_test_keys.name)
+(_key_dir / "test.pem").write_bytes(_key.public_key().public_bytes(
+    serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo))
+# Private file outside public directory, preventing accidental exposure to verifiers.
+_private = _key_dir / "signing.key"
+_private.write_bytes(_key.private_bytes(
+    serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()))
+for _name in (
+    "DATABASE_URL_FILE", "RABBITMQ_URL", "RABBITMQ_URL_FILE", "JWT_PRIVATE_KEY",
+    "PII_ENCRYPTION_KEY_FILE", "PII_HMAC_KEY_FILE",
+):
+    os.environ.pop(_name, None)
+os.environ["JWT_ISSUER"] = "passanorte"
+os.environ["JWT_AUDIENCE"] = "passanorte-api"
+os.environ["ACCESS_TOKEN_MINUTES"] = "15"
+os.environ["REFRESH_TOKEN_DAYS"] = "7"
+os.environ["APP_ENV"] = "test"
+os.environ["DATABASE_URL"] = "sqlite:///:memory:"
+os.environ["JWT_ACTIVE_KID"] = "test"
+os.environ["JWT_PUBLIC_KEYS_DIR"] = str(_key_dir)
+os.environ["JWT_PRIVATE_KEY_FILE"] = str(_private)
+os.environ["PII_HMAC_KEY"] = secrets.token_urlsafe(48)
+os.environ["PII_ENCRYPTION_KEY"] = Fernet.generate_key().decode()
+
 
 from sqlalchemy import create_engine  # noqa: E402
 from sqlalchemy.pool import StaticPool  # noqa: E402
 
 from shared import messaging  # noqa: E402
-from shared.db import (
+from shared.db import (  # noqa: E402
     Base,  # noqa: E402
     make_session_factory,  # noqa: E402
 )

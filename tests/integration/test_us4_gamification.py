@@ -6,13 +6,8 @@ conclusão com insígnia + código → resgate transacional pelo funcionário.
 
 from __future__ import annotations
 
-import os
-
 import pytest
 from fastapi.testclient import TestClient
-
-os.environ.setdefault("JWT_SECRET", "test-secret-32-bytes-for-hs256-00")
-os.environ.setdefault("PII_ENCRYPTION_KEY", "MgBPF0RbsIxVX4Vi5ZCp0P5ylutyWhnhSeB_9xIrsMY=")
 
 from services.gamification.app.core import deps as gam_deps  # noqa: E402
 from services.gamification.app.main import create_test_app as gam_factory  # noqa: E402

@@ -158,7 +158,7 @@ def _warn_degraded_once() -> None:
 
 def _log_scheduling_error(future: Future[None]) -> None:
     if not future.cancelled() and (exc := future.exception()) is not None:
-        log_event(logger, "event_publish_failed", error=f"{type(exc).__name__}: {exc}")
+        log_event(logger, "event_publish_failed", error=type(exc).__name__)
 
 
 def _ensure_supervisor() -> asyncio.AbstractEventLoop | None:
@@ -203,7 +203,7 @@ async def _supervisor() -> None:
             )
         except Exception as exc:  # noqa: BLE001 — disponibilidade é tolerância a falhas
             _state.connected.clear()
-            log_event(logger, "event_broker_unavailable", error=f"{type(exc).__name__}: {exc}")
+            log_event(logger, "event_broker_unavailable", error=type(exc).__name__)
             await asyncio.sleep(RECONNECT_INTERVAL)
             continue
         _state.connection = connection
@@ -271,7 +271,7 @@ def _make_callback(spec: ConsumerSpec) -> Callable[[AbstractIncomingMessage], Aw
                 "event_handler_failed",
                 queue=spec.queue_name(),
                 event_type=envelope.type,
-                error=f"{type(exc).__name__}: {exc}",
+                error=type(exc).__name__,
                 redelivered=message.redelivered,
             )
             # 1ª falha → requeue; na redelivery → DLQ (MAX_ATTEMPTS=2)
@@ -301,7 +301,7 @@ async def _finish(
         else:
             await message.nack(requeue=requeue)
     except Exception as exc:  # noqa: BLE001 — message já entregue/processada
-        log_event(logger, "event_delivery_finish_failed", error=f"{type(exc).__name__}: {exc}")
+        log_event(logger, "event_delivery_finish_failed", error=type(exc).__name__)
 
 
 async def _publish_async(envelope: EventEnvelope) -> None:
@@ -340,7 +340,7 @@ async def _publish_async(envelope: EventEnvelope) -> None:
                 "event_publish_retry",
                 event_type=envelope.type,
                 event_id=envelope.event_id,
-                error=f"{type(exc).__name__}: {exc}",
+                error=type(exc).__name__,
             )
             _state.connected.clear()  # canal fechado: espere a reconexão
     log_event(logger, "event_publish_failed", event_type=envelope.type, event_id=envelope.event_id,
