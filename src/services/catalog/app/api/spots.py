@@ -26,6 +26,7 @@ from shared.errors import ApiError
 from shared.insights_client import notify_access
 
 router = APIRouter(tags=["tourist-spots"])
+development_router = APIRouter(tags=["internal"])
 
 
 def _categories_for(db: Session, spot_id: str) -> list[CategoryOut]:
@@ -71,7 +72,8 @@ def list_spots(
 ) -> TouristSpotList:
     query = _spot_query(db)
     if claims_user:
-        notify_access(claims_user.get("sub"))  # RF07: acesso registrado no insights (D-05)
+        notify_access(claims_user["sub"], db=db)
+        db.commit()  # RF07: acesso registrado no insights (D-05)
     if status:
         query = query.filter(TouristSpot.status == SpotStatus(status))
     if category:
@@ -140,7 +142,7 @@ def get_external_links(spot_id: str, db: Session = Depends(get_db)) -> ExternalL
 
 # --- interno (outros serviços) — T030 ----------------------------------------
 
-@router.post("/internal/tourist-spots", tags=["internal"], status_code=201)
+@development_router.post("/internal/tourist-spots", status_code=201)
 def internal_create_spot(payload: dict, db: Session = Depends(get_db)) -> dict:
     """Seed interno de ponto turístico (usado por seed admin e testes)."""
 

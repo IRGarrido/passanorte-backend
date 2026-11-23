@@ -18,6 +18,7 @@ from shared.errors import ApiError
 from shared.notifications_client import dispatch
 
 router = APIRouter(tags=["events (admin)"])
+development_router = APIRouter(tags=["internal"])
 
 require_admin = require_role("admin")
 
@@ -101,12 +102,11 @@ def create_event(
     db.flush()
     record_audit(db, AuditLog, actor_id=claims["sub"], action="create_event",
                  entity="event", entity_id=event.id, payload={"title": payload.title})
-    db.commit()
     # RF37: inscritos nas categorias do ponto recebem notificação (fire-and-forget)
     spot_categories = [
         row.category_id for row in db.query(SpotCategory).filter(SpotCategory.spot_id == payload.tourist_spot_id).all()
     ]
-    dispatch(kind="new_event", source_id=event.id, title=payload.title,
+    dispatch(db=db, kind="new_event", source_id=event.id, title=payload.title,
              body=payload.description, category_ids=spot_categories,
              payload={"event_id": event.id, "tourist_spot_id": payload.tourist_spot_id})
     # D-08: rebuild do embedding do evento no chatbot (fire-and-forget)
@@ -121,7 +121,8 @@ def create_event(
             "ticket_price": float(event.ticket_price),
             "occurs_at": str(event.occurs_at),
         }
-    ])
+    ], db=db)
+    db.commit()
     return {
         "id": event.id,
         "tourist_spot_id": event.tourist_spot_id,
@@ -184,7 +185,7 @@ def create_category(
     return {"id": category.id, "name": category.name}
 
 
-@router.post("/internal/events/notify-subscribers", tags=["internal"], status_code=202)
+@development_router.post("/internal/events/notify-subscribers", status_code=202)
 def notify_subscribers(
     payload: NotifySubscribersPayload, db: Session = Depends(get_db)
 ) -> dict:
@@ -201,6 +202,7 @@ def notify_subscribers(
         for row in db.query(SpotCategory).filter(SpotCategory.spot_id == event.tourist_spot_id).all()
     ]
     dispatch(
+        db=db,
         kind="new_event",
         source_id=event.id,
         title=event.title,
@@ -208,4 +210,5 @@ def notify_subscribers(
         category_ids=spot_categories,
         payload={"event_id": event.id, "tourist_spot_id": event.tourist_spot_id},
     )
+    db.commit()
     return {"event_id": event.id, "categories": len(spot_categories)}

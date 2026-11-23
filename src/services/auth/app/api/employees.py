@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import logging
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, status
-from pydantic import BaseModel, Field
+from pydantic import AfterValidator, BaseModel, Field
 from sqlalchemy.orm import Session
 
 from services.auth.app.core.deps import get_db, require_role
@@ -14,7 +15,7 @@ from services.auth.app.models.user import User, UserRole
 from shared.audit import record_audit
 from shared.errors import ApiError
 from shared.logging import log_event
-from shared.security import hash_password
+from shared.security import hash_password, validate_password
 
 router = APIRouter(tags=["employees"])
 logger = logging.getLogger("auth")
@@ -26,7 +27,7 @@ class EmployeeCreate(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     surname: str = Field(min_length=1, max_length=120)
     email: str
-    password: str = Field(min_length=8)
+    password: Annotated[str, AfterValidator(validate_password)] = Field(min_length=8)
 
 
 class EmployeeUpdate(BaseModel):

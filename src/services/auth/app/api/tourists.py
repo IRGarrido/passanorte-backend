@@ -32,7 +32,7 @@ def register_tourist(payload: TouristCreate, db: Session = Depends(get_db)) -> U
     if db.query(User).filter(User.email == payload.email).first() is not None:
         raise ApiError(code="duplicate_identity", message="Email já cadastrado.", status_code=409)
 
-    document = (payload.cpf or payload.passport).strip()
+    document = (payload.cpf or payload.passport or "").strip()
     document_hash = pii_uniqueness_hash(document)
     if db.query(User).filter((User.cpf_hash == document_hash) | (User.passport_hash == document_hash)).first():
         raise ApiError(

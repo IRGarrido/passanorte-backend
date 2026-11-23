@@ -1,7 +1,7 @@
 """Modelos de identidade do serviço auth (T015, data-model.md).
 
 Regras de unicidade: email único; CPF OU passaporte único via hash HMAC
-(FR-006) — os valores sensíveis ficam criptografados (AES-256-GCM, RNF08).
+(FR-006) — os valores sensíveis ficam criptografados (Fernet, RNF08).
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ import uuid
 from sqlalchemy import Boolean, Enum, ForeignKey, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
-from shared.db import Base
+from services.auth.app.db import Base
 
 
 class UserRole(str, enum.Enum):

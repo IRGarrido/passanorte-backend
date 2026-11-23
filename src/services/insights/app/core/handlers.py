@@ -51,7 +51,7 @@ def ingest_visit_fact(db: Session, payload: dict) -> dict:
         occurred_at=occurred_at,
     )
     db.add(fact)
-    db.commit()
+    db.flush()
     log_event(logger, "visit_fact_ingested", user_id=payload["user_id"], spot_id=payload["tourist_spot_id"])
     return {"id": fact.id, "status": "ingested"}
 
@@ -60,7 +60,7 @@ def ingest_access(db: Session, payload: dict) -> dict:
     """Registro de acesso à aplicação (RF07)."""
     access = AccessLog(user_id=payload["user_id"], client=payload.get("client"))
     db.add(access)
-    db.commit()
+    db.flush()
     log_event(logger, "access_ingested", user_id=payload["user_id"])
     return {"id": access.id, "status": "ingested"}
 
@@ -77,5 +77,6 @@ def _consume(ingest_fn, data: dict) -> None:
     db = service_session_factory()()
     try:
         ingest_fn(db, data)
+        db.commit()
     finally:
         db.close()

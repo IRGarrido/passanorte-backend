@@ -6,13 +6,8 @@ funcionários no auth (RF04/RF05), com auditoria (RNF19).
 
 from __future__ import annotations
 
-import os
-
 import pytest
 from fastapi.testclient import TestClient
-
-os.environ.setdefault("JWT_SECRET", "test-secret-32-bytes-for-hs256-00")
-os.environ.setdefault("PII_ENCRYPTION_KEY", "MgBPF0RbsIxVX4Vi5ZCp0P5ylutyWhnhSeB_9xIrsMY=")
 
 from services.auth.app.core import deps as auth_deps  # noqa: E402
 from services.auth.app.main import create_test_app as auth_factory  # noqa: E402
@@ -158,14 +153,14 @@ def test_negative_ticket_price_rejected(catalog_client, admin_headers):
     assert resp.status_code == 422
 
 
-def test_admin_snapshot_internal_endpoint(catalog_client, admin_headers):
+def test_admin_snapshot_internal_endpoint(catalog_client, admin_headers, internal_headers):
     headers = admin_headers
     spot = catalog_client.post(
         "/api/v1/tourist-spots",
         headers=headers,
         json={"name": "X", "description": "Y", "latitude": -3.0, "longitude": -60.0, "category_ids": ["c1"]},
     ).json()
-    resp = catalog_client.get(f"/api/v1/internal/tourist-spots/{spot['id']}")
+    resp = catalog_client.get(f"/api/v1/internal/tourist-spots/{spot['id']}", headers=internal_headers)
     body = resp.json()
     assert body["latitude"] == -3.0
     assert body["category_ids"] == ["c1"]
