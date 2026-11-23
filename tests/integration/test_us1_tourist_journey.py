@@ -11,6 +11,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.pool import StaticPool
 
 from services.auth.app.core import deps as auth_deps  # noqa: E402
+from services.auth.app.core.categories import get_category_lookup
 from services.auth.app.main import create_test_app as auth_app_factory  # noqa: E402
 from services.catalog.app.core import deps as catalog_deps  # noqa: E402
 from services.catalog.app.main import create_test_app as catalog_app_factory  # noqa: E402
@@ -26,6 +27,7 @@ def auth_and_catalog() -> tuple[TestClient, TestClient]:
     auth_app.dependency_overrides[auth_deps.get_db] = lambda: make_session_factory(engine)()
     catalog_app = catalog_app_factory()
     catalog_app.dependency_overrides[catalog_deps.get_db] = lambda: make_session_factory(engine)()
+    auth_app.dependency_overrides[get_category_lookup] = lambda: lambda ids: set(ids) & {"cat-cultura"}
     return TestClient(auth_app), TestClient(catalog_app)
 
 
@@ -42,7 +44,8 @@ def test_us1_full_tourist_journey(auth_and_catalog, internal_headers):
             "password": "s3cr3t!x",
             "phone": "+55 92 99999-0000",
             "country_of_origin": "Brasil",
-            "cpf": "123.456.789-00",
+            "consent_version": "1", "accept_terms": True, "accept_privacy": True,
+            "cpf": "529.982.247-25",
         },
     )
     assert resp.status_code == 201, resp.text
@@ -57,7 +60,8 @@ def test_us1_full_tourist_journey(auth_and_catalog, internal_headers):
             "password": "s3cr3t!x",
             "phone": "+55 92 99999-1111",
             "country_of_origin": "Brasil",
-            "cpf": "123.456.789-00",
+            "consent_version": "1", "accept_terms": True, "accept_privacy": True,
+            "cpf": "529.982.247-25",
         },
     )
     assert resp.status_code == 409

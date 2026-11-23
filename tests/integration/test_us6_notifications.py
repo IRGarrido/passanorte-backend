@@ -15,6 +15,7 @@ from services.auth.app.core import deps as auth_deps  # noqa: E402
 from services.auth.app.main import create_test_app as auth_factory  # noqa: E402
 from services.catalog.app.core import deps as catalog_deps  # noqa: E402
 from services.catalog.app.main import create_test_app as catalog_factory  # noqa: E402
+from services.catalog.app.models.spot import Category
 from services.notifications.app.core import deps as notif_deps  # noqa: E402
 from services.notifications.app.main import create_test_app as notif_factory  # noqa: E402
 from shared.security import create_access_token  # noqa: E402
@@ -43,6 +44,8 @@ def test_us6_notification_flow(services, replay, db_session):
     apps, auth_headers = services
     catalog, notif = apps["catalog"], apps["notifications"]
     admin = auth_headers("admin-1", "admin")
+    db_session.add(Category(id="cat-cultura", name="Cultura"))
+    db_session.commit()
 
     # 1. turistas se inscrevem em interesses (RF37)
     notif.put("/api/v1/subscriptions", json={"category_ids": ["cat-cultura"]},
@@ -55,7 +58,7 @@ def test_us6_notification_flow(services, replay, db_session):
         "/api/v1/tourist-spots",
         headers=admin,
         json={"name": "Teatro Amazonas", "description": "Teatro histórico", "latitude": -3.4704,
-              "longitude": -60.0238, "category_ids": ["cat-cultura"]},
+              "longitude": -60.0238, "address": "Manaus", "category_ids": ["cat-cultura"]},
     )
     assert resp.status_code == 201, resp.text
     spot_id = resp.json()["id"]
@@ -72,7 +75,8 @@ def test_us6_notification_flow(services, replay, db_session):
         "/api/v1/events",
         headers=admin,
         json={"tourist_spot_id": spot_id, "title": "Festival", "description": "d",
-              "occurs_at": "2026-10-01T20:00:00", "ticket_price": 25.0},
+              "starts_at": "2036-10-01T20:00:00",
+              "ends_at": "2036-10-01T22:00:00", "ticket_price": 25.0},
     )
     assert resp.status_code == 201, resp.text
     replay("notifications", db_session)

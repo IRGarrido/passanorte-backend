@@ -290,7 +290,7 @@ async def _supervisor() -> None:
             dlq = await channel.declare_queue(QUEUE_DLQ, durable=True)
             await dlq.bind(dlx, routing_key="#")
             for consumer, routing_key in (
-                ("insights", "visit.validated"), ("insights", "access.registered"),
+                ("insights", "visit.validated"), ("insights", "access.registered"), ("insights", "tourist.login"),
                 ("notifications", "notification.dispatch"), ("chatbot", "catalog.index.refresh"),
             ):
                 await _declare_queue(channel, f"passanorte.{consumer}.{routing_key}", routing_key)

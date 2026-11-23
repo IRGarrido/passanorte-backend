@@ -1,7 +1,7 @@
 ---
 document_id: passanorte-implementation-plan
 format_version: "1.0"
-plan_version: "1.0"
+plan_version: "1.2"
 converted_at: "2026-11-23"
 language: pt-BR
 purpose: ai_retrieval_and_implementation_guidance
@@ -85,7 +85,7 @@ A sequência contém oito sprints, agrupadas nas três etapas solicitadas. A spr
   - Sprints: S7 e S8
   - Marco de saída: M3 MVP completo com RAG e Ollama, depois da aprovação de M2.
 
-Dependência principal: S1 → S2 → S3 → S4 → S5 → S6 → S7 → S8. Dentro da sprint, contratos e migrations precedem os consumidores. Trabalho em clientes pode avançar com contratos estáveis, mas a sprint só termina com a evidência integrada exigida.
+Dependência principal: S1 → S2 → S3 → S4 → S5 → S6 → S7 → S8. O trabalho atual prioriza backend e infraestrutura. Os aceites dessa etapa usam evidências de API e serviços integrados. A implementação, a integração e a homologação de React e Android ficam pendentes no item P4.
 
 - Responsável de produto: esclarecer ambiguidades e aceitar o comportamento por RF/RN. Liderança técnica: arquitetura, contratos, migração e revisão. Backend/infra: implementação e operação. Clientes: React e Android. QA: regressão, concorrência e evidências. Os nomes serão atribuídos no início de cada sprint.
 - Cada tarefa deve registrar ID, RF/RNF/RN relacionados, serviço, dependência, responsável, critérios de aceite, teste, migration/rollback quando aplicável e evidência do commit. Estados sugeridos: planejada, em andamento, em revisão, bloqueada e aceita.
@@ -363,18 +363,18 @@ Compose validado e executado, relatório de privilégios, OpenAPI por serviço, 
 #### TASK S3.6
 
 - status: planned
-- acao: Implementar relevância por interesses e proximidade e fallback por nome, ocultar permanentemente fechados, expor dados completos e link Maps. Atualizar telas React/Android de acesso, perfis de painel e descoberta com contrato novo.
+- acao: Implementar relevância por interesses e proximidade e fallback por nome, ocultar permanentemente fechados, expor dados completos e link Maps. A atualização das telas está pendente em P4.
 
 ### Critérios de aceite da sprint
 
 - **S3.AC1**: Admin acessa todas as funções administrativas; supplier não acessa CRUD/dashboard e não é salvo sem parceiro. tourist não acessa painel. API aplica 401/403 independentemente dos menus.
 - **S3.AC2**: CPF inválido, duplicidade normalizada ou ausência de aceite são recusados. Documento/senha não aparecem em respostas ou logs.
 - **S3.AC3**: Ponto sem categoria/coordenada válida não é salvo; agenda reenviada mantém sucesso; eventos encerrados não aparecem. Interesses/proximidade/fallback têm testes de ordenação.
-- **S3.AC4**: Cadastro, login e descoberta funcionam no app; painel gerencia usuários/parceiros/pontos/eventos.
+- **S3.AC4**: Testes de API comprovam os fluxos de cadastro, login e descoberta e a gestão administrativa de usuários, parceiros, pontos e eventos. A validação ponta a ponta no Android e no React está no item P4.
 
 ### Evidências de conclusão
 
-Testes RBAC e validações, migrations de personas, contrato de catálogo, testes de ordenação e demonstração nos clientes.
+Testes RBAC e validações, migrations de personas, contrato de catálogo e testes de ordenação e de fluxo pela API.
 
 ## SPRINT S4 — Rotas check-in progresso e guaranás
 
@@ -415,7 +415,7 @@ Testes RBAC e validações, migrations de personas, contrato de catálogo, teste
 #### TASK S4.6
 
 - status: planned
-- acao: Garantir outbox, retry e confirmação do crédito no fluxo de check-in; expor saldo e estado de operação durante recuperação. Atualizar app com progresso, já visitado e saldo; incluir painel de gestão de rotas.
+- acao: Garantir outbox, retry e confirmação do crédito no fluxo de check-in; expor pela API saldo, progresso, visitas e estado da operação. As telas de progresso e gestão de rotas estão pendentes em P4.
 
 ### Critérios de aceite da sprint
 
@@ -462,18 +462,18 @@ Testes de domínio/concorrência em PostgreSQL, falhas do broker/retry, concilia
 #### TASK S5.5
 
 - status: planned
-- acao: Adicionar tela web com câmera/QR e entrada manual, em HTTPS; fornecedor só vê essa função. App mostra catálogo, resgate, saldo atualizado e meus cupons. Remover /prizes e contratos de brindes, com migração/avisos para clientes existentes.
+- acao: Remover /prizes e contratos de brindes, com migração e aviso de mudança de contrato. As telas de validação web e cupons no app estão pendentes em P4.
 
 ### Critérios de aceite da sprint
 
 - **S5.AC1**: Vinte requisições para última unidade dão um sucesso, um débito e um código; saldo e disponibilidade nunca negativos.
 - **S5.AC2**: Saldo insuficiente, resgate duplicado ou cupom inativo falham sem débito. Retry da mesma operação recupera resultado sem novo efeito.
 - **S5.AC3**: Duas validações concorrentes dão um uso registrado; supplier de outro parceiro recebe recusa; admin valida qualquer parceiro.
-- **S5.AC4**: QR e digitação funcionam no Chrome/Firefox e navegador de celular; app completa check-in→guaranás→resgate→uso.
+- **S5.AC4**: Teste integrado pelo Kong comprova check-in→guaranás→resgate→uso. O aceite de câmera/QR e digitação nos clientes está em P4.
 
 ### Evidências de conclusão
 
-Relatório de concorrência PostgreSQL, trilha de auditoria protegida, testes negativos RBAC e demonstração dos clientes.
+Relatório de concorrência PostgreSQL, trilha de auditoria protegida, testes negativos RBAC e jornada integrada pelo Kong.
 
 ## SPRINT S6 — Notificações analytics e aceite do sistema principal
 
@@ -509,7 +509,7 @@ Relatório de concorrência PostgreSQL, trilha de auditoria protegida, testes ne
 #### TASK S6.5
 
 - status: planned
-- acao: Homologar React e Android com JWT/RBAC, textos pt-BR/en do app, leitor de tela, navegação e teste com cinco pessoas. Integrar o painel ao Compose para cumprir RNF10; os clientes são dependências do projeto, não requisitos dispensados por estarem fora do backend.
+- acao: Verificar JWT/RBAC pela API e a inicialização integrada dos serviços de backend pelo Compose. A integração do painel ao Compose e a homologação dos clientes estão pendentes em P4.
 
 #### TASK S6.6
 
@@ -520,12 +520,12 @@ Relatório de concorrência PostgreSQL, trilha de auditoria protegida, testes ne
 
 - **S6.AC1**: Só interessados habilitados recebem push de conteúdo novo; opt-out é respeitado. Queda do broker/provider não perde a intenção, nem cria duplicidade de inbox.
 - **S6.AC2**: Totais por período conferem com origem; reprocessar eventos não altera totais. Heatmap tem coordenadas dos pontos e distribuição usa turistas, não número de visitas.
-- **S6.AC3**: Meta inicial p95 ≤ 500 ms para consultas simples com 50 usuários simultâneos; relatório descreve ambiente/dados. Pelo menos 4 de 5 pessoas concluem cadastro→check-in sem ajuda.
+- **S6.AC3**: Meta inicial p95 ≤ 500 ms para consultas simples com 50 usuários simultâneos; relatório descreve ambiente/dados. O teste com usuários está em P4.
 - **S6.AC4**: Sistema principal roda com um comando após preparação documentada; chatbot desligado não afeta jornadas. Todos os aceites M2 têm evidência, sem defeito crítico/alto pendente.
 
 ### Evidências de conclusão
 
-Entrega push em aparelho, conciliação analytics, teste de carga, acessibilidade/i18n, checklist de clientes e relatório de homologação M2.
+Evidência de processamento e envio pelo provedor push, conciliação analytics, teste de carga e relatório de homologação do backend M2. A confirmação em aparelho está em P4.
 
 ## SPRINT S7 — Base de conhecimento e recuperação RAG
 
@@ -2130,10 +2130,21 @@ Campos da matriz mantêm sua origem. `escopo_plano` contém a promoção aprovad
 - **P3 Evolução de roteiro e escala**
   - Requisitos: RF43, RNF11
   - Direcionamento: Salvar roteiro/rota pessoal e comprovar duas ou mais réplicas independentes com balanceamento, sem duplicidade de crédito/resgate.
+- **P4 Implementação e validação de Android e React**
+  - Status: pendente. Depende dos contratos e do backend das sprints correspondentes.
+  - S3: acesso, cadastro, descoberta e perfis do painel. Demonstrar a gestão de usuários, parceiros, pontos e eventos.
+  - S4: progresso, visitas e saldo no app, com gestão de rotas no painel.
+  - S5: catálogo, resgate e cupons no app. Validação web por câmera/QR e entrada manual em HTTPS no Chrome, Firefox e navegador móvel, com interface de fornecedor limitada à validação.
+  - S6: integração do painel ao Compose, recepção de push no Android, JWT/RBAC nos clientes, textos pt-BR/en, leitor de tela e navegação. Pelo menos 4 de 5 pessoas concluem cadastro→check-in sem ajuda.
+  - Evidência: demonstração e registro dos testes ponta a ponta nos dois clientes.
 
 Notificações não fazem parte deste backlog: foram promovidas para S6. Chatbot também não é pós-MVP neste plano; é a última etapa do MVP. APIs antecipadas do legado podem ser preservadas apenas se seguras e coerentes, sem consumir prioridade nem ampliar o aceite obrigatório.
 
 ## PROVENANCE
+
+**Revisão 1.2 · 23/11/2026.** A etapa atual prioriza backend e infraestrutura. As implementações, integrações e validações de Android e React permanecem pendentes em P4; os testes de API e serviços integrados orientam o aceite do backend.
+
+**Revisão 1.1 · 23/11/2026.** Por decisão de escopo, a homologação dos fluxos da S3 no Android e no React passa para o pós-MVP. O aceite da S3 usa evidências da API e das migrações. O escopo de implementação das telas previsto em S3.6 permanece registrado.
 
 **Versão 1.0 · 22/11/2026.** Destinatários: equipe de produto, backend, infraestrutura, painel, Android e QA. Próxima revisão: abertura de S1 e a cada marco M1/M2/M3. Atualizar matriz/planilha em revisão identificada; preservar a versão 2.0 original para comparação.
 

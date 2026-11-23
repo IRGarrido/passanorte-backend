@@ -35,9 +35,9 @@ def get_current_user(request: Request) -> dict:
         raise ApiError(code="unauthorized", message="Autenticação necessária.", status_code=401) from None
 
 
-def require_role(role: str) -> Callable:
+def require_role(*roles: str) -> Callable:
     def dependency(claims: dict = Depends(get_current_user)) -> dict:
-        if claims.get("role") != role:
+        if claims.get("role") not in roles:
             raise ApiError(code="forbidden", message="Acesso negado para o seu perfil.", status_code=403)
         return claims
 

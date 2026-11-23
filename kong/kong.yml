@@ -35,7 +35,7 @@ services:
       - name: auth-api
         strip_path: false
         paths:
-          - "~/api/v1/(tourists|session|employees)(/.*)?$"
+          - "~/api/v1/(tourists|session|panel/users)(/.*)?$"
           - "~/api/v1/me(/interests)?/?$"
         plugins:
           - name: jwt
@@ -74,7 +74,7 @@ services:
       - name: catalog-api
         strip_path: false
         paths:
-          - "~/api/v1/(tourist-spots|admin/tourist-spots|categories|events)(/.*)?$"
+          - "~/api/v1/(tourist-spots|admin/tourist-spots|admin/events|categories|events)(/.*)?$"
           - "~/api/v1/routes(?:/[^/]+)?/?$"
         plugins:
           - name: jwt
@@ -98,7 +98,7 @@ services:
       - name: benefits-api
         regex_priority: 110
         strip_path: false
-        paths: ["~/api/v1/me/(balance|coupons)(/.*)?$"]
+        paths: ["~/api/v1/me/(balance|coupons)(/.*)?$", "~/api/v1/partners(/.*)?$"]
         plugins:
           - name: jwt
             config:

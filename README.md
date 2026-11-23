@@ -21,6 +21,8 @@ flowchart TD
 
 [Limites dos sete serviços e ownership](docs/architecture/ADR-002-S2-service-boundaries.md)
 
+[Contrato e migração da S3](docs/implementation/S3_BACKEND.md)
+
 ## Primeiro uso local
 
 Pré-requisitos: Docker com Compose v2 e uv. No Windows, inicie Docker Desktop em modo Linux.
@@ -80,7 +82,7 @@ Rotas principais de identidade sob `https://localhost:8443/api/v1`:
 
 | Método / rota | Contrato |
 | --- | --- |
-| POST /tourists | Cadastro legado, público |
+| POST /tourists | Cadastro público com documento validado e aceite versionado |
 | POST /session | email/password; retorna access_token, refresh_token, expires_in |
 | POST /session/refresh | Corpo {"refresh_token":"..."}; retorna **novo par** |
 | DELETE /session | Mesmo corpo; revoga a família da sessão; não exige access válido |

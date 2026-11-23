@@ -84,7 +84,7 @@ def validate_service(service: str) -> Settings:
     settings = Settings.load()
     verification_keys()
     if settings.app_env != "test":
-        if service in {"auth", "catalog", "gamification"}:
+        if service in {"auth", "benefits", "catalog", "gamification"}:
             secret("INTERNAL_API_TOKEN")
         if service == "gamification" and not os.environ.get("CATALOG_SERVICE_URL"):
             raise ConfigurationError("Missing CATALOG_SERVICE_URL")

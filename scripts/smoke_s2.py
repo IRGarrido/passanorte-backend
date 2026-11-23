@@ -15,6 +15,7 @@ def main() -> None:
     parser.add_argument("--email", required=True)
     parser.add_argument("--password-file", type=Path, default=Path("secrets/admin-password"))
     parser.add_argument("--chatbot", action="store_true")
+    parser.add_argument("--s3", action="store_true", help="Verify S3 catalog and admin routes.")
     args = parser.parse_args()
     base = args.url.rstrip("/")
     domains = ["auth", "catalog", "gamification", "benefits", "insights", "notifications"]
@@ -36,11 +37,21 @@ def main() -> None:
         }).raise_for_status().json()["access_token"]
         authorization = {"Authorization": f"Bearer {token}"}
         client.get("/api/v1/me", headers=authorization).raise_for_status()
+        if args.s3:
+            names = {entry["name"] for entry in response.json()["items"]}
+            assert {"Lazer", "Cultura", "Gastronomia"} <= names
+            for path in ("partners", "panel/users", "admin/events", "admin/tourist-spots"):
+                assert client.get(f"/api/v1/{path}").status_code == 401
+                result = client.get(f"/api/v1/{path}", headers=authorization).raise_for_status()
+                assert isinstance(result.json()["items"], list)
+            assert client.get("/api/v1/employees", headers=authorization).status_code == 404
         for path in ("balance", "coupons"):
             assert client.get(f"/api/v1/me/{path}").status_code == 401
             response = client.get(f"/api/v1/me/{path}", headers=authorization)
             assert response.status_code == 404 and response.json()["detail"] == "Not Found"
     print("Kong, TLS, Swagger, JWT and S2 route reservation checks passed.")
+    if args.s3:
+        print("S3 catalog seed and admin gateway routes passed.")
 
 
 if __name__ == "__main__":
