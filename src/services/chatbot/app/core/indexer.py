@@ -78,7 +78,7 @@ def refresh_index_items(db: Session, embedder, items: list[IndexItem]) -> dict:
                 embedding=list(vector),
             )
         )
-    db.commit()
+    db.flush()
     log_event(logger, "index_refreshed", count=len(items))
     return {"indexed": len(items)}
 
@@ -95,5 +95,6 @@ def handle_refresh(data: dict) -> None:
     db = service_session_factory()()
     try:
         refresh_from_payload(db, data)
+        db.commit()
     finally:
         db.close()

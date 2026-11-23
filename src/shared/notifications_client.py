@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import logging
 
+from sqlalchemy.orm import Session
+
 from shared import messaging
 
 logger = logging.getLogger("notifications_client")
@@ -22,6 +24,7 @@ def dispatch(
     category_ids: list[str] | None = None,
     user_ids: list[str] | None = None,
     payload: dict | None = None,
+    db: Session | None = None,
 ) -> None:
     """Publica um evento `notification.dispatch` por alvo (idempotente no consumer)."""
     targets: list[str | None] = list(category_ids) if category_ids else [None]
@@ -37,4 +40,4 @@ def dispatch(
             message["category_id"] = category_id
         if user_ids:
             message["user_ids"] = user_ids
-        messaging.publish("notification.dispatch", message)
+        messaging.enqueue(db, "notification.dispatch", message)

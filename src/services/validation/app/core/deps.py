@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from shared.errors import ApiError
 from shared.security import decode_token
-from shared.settings import Settings
+from shared.settings import Settings, secret
 
 
 def get_db() -> Generator[Session, None, None]:
@@ -41,7 +41,10 @@ def get_catalog_snapshot() -> Callable[[str], dict]:
 
     def fetch(spot_id: str) -> dict:
         try:
-            resp = httpx.get(f"{base_url}/api/v1/internal/tourist-spots/{spot_id}", timeout=5.0)
+            resp = httpx.get(
+                f"{base_url}/api/v1/internal/tourist-spots/{spot_id}",
+                headers={"X-Internal-Token": secret("INTERNAL_API_TOKEN", required=False)}, timeout=5.0,
+            )
         except httpx.HTTPError:
             raise ApiError(
                 code="catalog_unavailable",

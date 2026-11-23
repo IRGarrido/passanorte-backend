@@ -21,7 +21,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from shared.db import Base
+from services.catalog.app.db import Base
 
 
 class SpotStatus(str, enum.Enum):

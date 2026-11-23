@@ -2,7 +2,7 @@
 from sqlalchemy import BigInteger, Boolean, ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column
 
-from shared.db import Base
+from services.auth.app.db import Base
 
 
 class RefreshSession(Base):

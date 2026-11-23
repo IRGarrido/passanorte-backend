@@ -51,21 +51,32 @@ os.environ["DATABASE_URL"] = "sqlite:///:memory:"
 os.environ["JWT_ACTIVE_KID"] = "test"
 os.environ["JWT_PUBLIC_KEYS_DIR"] = str(_key_dir)
 os.environ["JWT_PRIVATE_KEY_FILE"] = str(_private)
+os.environ.pop("INTERNAL_API_TOKEN_FILE", None)
+os.environ["INTERNAL_API_TOKEN"] = secrets.token_urlsafe(48)
 os.environ["PII_HMAC_KEY"] = secrets.token_urlsafe(48)
 os.environ["PII_ENCRYPTION_KEY"] = Fernet.generate_key().decode()
 
 
-from sqlalchemy import create_engine  # noqa: E402
+from sqlalchemy import Engine, create_engine  # noqa: E402
 from sqlalchemy.pool import StaticPool  # noqa: E402
 
 from shared import messaging  # noqa: E402
-from shared.db import (  # noqa: E402
-    Base,  # noqa: E402
-    make_session_factory,  # noqa: E402
-)
+from shared.db import DOMAINS, make_session_factory  # noqa: E402
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+
+def create_test_tables(engine: Engine) -> Engine:
+    from importlib import import_module
+
+    translated = engine.execution_options(schema_translate_map={name: None for name in DOMAINS})
+    import_module("services.validation.app.models.visit")
+    for name in DOMAINS:
+        import_module(f"services.{name}.app.models")
+        base = import_module(f"services.{name}.app.db").Base
+        base.metadata.create_all(translated)
+    return translated
 
 
 @pytest.fixture
@@ -76,8 +87,7 @@ def db_session() -> Iterator[Session]:
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
-    Base.metadata.create_all(engine)
-    factory = make_session_factory(engine)
+    factory = make_session_factory(create_test_tables(engine))
     session = factory()
     try:
         yield session
@@ -136,3 +146,42 @@ def _deliver(service: str, db: Session, event: dict[str, Any]) -> bool:
             indexer.refresh_from_payload(db, event["data"])
             return True
     return False
+
+
+@pytest.fixture
+def internal_headers() -> dict[str, str]:
+    return {"X-Internal-Token": os.environ["INTERNAL_API_TOKEN"]}
+
+
+@pytest.fixture
+def connect_route_services(db_session, internal_headers):
+    """Exercise both HTTP contracts without a Docker network."""
+    from fastapi.testclient import TestClient
+
+    from services.catalog.app.api.routes import get_prize_service
+    from services.catalog.app.core.deps import get_db
+    from services.catalog.app.main import create_test_app
+    from services.gamification.app.core.deps import get_route_lookup
+    from shared.internal_client import RouteSnapshot
+
+    def connect(gamification_app):
+        catalog_app = create_test_app()
+        catalog_app.dependency_overrides[get_db] = lambda: db_session
+        catalog = TestClient(catalog_app)
+        gamification = TestClient(gamification_app)
+
+        def prizes(method, path, **kwargs):
+            response = gamification.request(method, f"/api/v1{path}", headers=internal_headers, **kwargs)
+            return response.raise_for_status().json()
+
+        def lookup(route_id):
+            response = catalog.get(f"/api/v1/internal/routes/{route_id}", headers=internal_headers)
+            if response.status_code == 404:
+                return None
+            return RouteSnapshot.model_validate(response.raise_for_status().json())
+
+        catalog_app.dependency_overrides[get_prize_service] = lambda: prizes
+        gamification_app.dependency_overrides[get_route_lookup] = lambda: lookup
+        return catalog, gamification
+
+    return connect

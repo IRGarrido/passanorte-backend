@@ -15,13 +15,14 @@ from services.auth.app.core import deps as auth_deps  # noqa: E402
 from services.auth.app.main import create_test_app as auth_app_factory  # noqa: E402
 from services.catalog.app.core import deps as catalog_deps  # noqa: E402
 from services.catalog.app.main import create_test_app as catalog_app_factory  # noqa: E402
-from shared.db import Base, make_session_factory  # noqa: E402
+from shared.db import make_session_factory  # noqa: E402
+from tests.conftest import create_test_tables
 
 
 @pytest.fixture
 def services() -> tuple[TestClient, TestClient]:
     engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool)
-    Base.metadata.create_all(engine)
+    engine = create_test_tables(engine)
     auth_app = auth_app_factory()
     auth_app.dependency_overrides[auth_deps.get_db] = lambda: make_session_factory(engine)()
     catalog_app = catalog_app_factory()
@@ -107,7 +108,7 @@ def test_us2_full_admin_journey(services):
     assert catalog.get("/api/v1/tourist-spots").status_code == 200
 
     # 6. auditoria das ações admin (RNF19)
-    from shared.audit_model import AuditLog
+    from services.auth.app.models.audit import AuditLog
 
     actions = {log.action for log in session.query(AuditLog).all()}
     assert {"create_spot", "set_schedule", "set_status", "create_event", "create_employee"} <= actions

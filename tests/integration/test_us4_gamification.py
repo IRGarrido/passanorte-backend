@@ -19,7 +19,7 @@ SPOTS = ["spot-1", "spot-2"]
 
 
 @pytest.fixture
-def services(db_session):
+def services(db_session, connect_route_services):
     """validation e gamification compartilham o mesmo banco em memória."""
     val_app = val_factory()
     val_app.dependency_overrides[val_deps.get_db] = lambda: db_session
@@ -39,7 +39,8 @@ def services(db_session):
         return [row.tourist_spot_id for row in rows]
 
     gam_app.dependency_overrides[gam_deps.get_validated_visits] = lambda: fetch_validated
-    return TestClient(val_app), TestClient(gam_app)
+    catalog, gamification = connect_route_services(gam_app)
+    return catalog, TestClient(val_app), gamification
 
 
 def _headers(role: str, user_id: str) -> dict:
@@ -48,13 +49,13 @@ def _headers(role: str, user_id: str) -> dict:
 
 
 def test_us4_full_gamification_cycle(services):
-    validation, gamification = services
+    catalog, validation, gamification = services
     admin = _headers("admin", "admin-1")
     tourist = _headers("tourist", "user-7")
     employee = _headers("employee", "emp-2")
 
     # 1. admin cadastra rota com brinde e estoque (RF18)
-    resp = gamification.post(
+    resp = catalog.post(
         "/api/v1/routes",
         headers=admin,
         json={"name": "Rota Histórica", "description": "d", "points": SPOTS,

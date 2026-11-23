@@ -12,7 +12,7 @@ RUN groupadd --gid 10001 app && useradd --uid 10001 --gid app --no-create-home a
 WORKDIR /app
 COPY --from=builder --chown=app:app /app/.venv /app/.venv
 COPY --chown=app:app src /app/src
-COPY --chown=app:app scripts/apply_migrations.sh scripts/create_admin.py scripts/rotate_pii.py /app/scripts/
+COPY --chown=app:app scripts/apply_migrations.sh scripts/create_admin.py scripts/rotate_pii.py scripts/provision_database.py scripts/migrate_legacy.py /app/scripts/
 ENV PATH="/app/.venv/bin:$PATH" PYTHONPATH=/app/src PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
 USER app
 CMD ["uvicorn", "services.auth.app.main:app", "--host", "0.0.0.0", "--port", "8001"]

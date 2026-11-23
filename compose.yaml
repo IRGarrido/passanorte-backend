@@ -1,4 +1,3 @@
-# S1: separate service processes; seven legacy databases until S2 migration.
 x-environment: &environment
   APP_ENV: ${APP_ENV:-production}
   RABBITMQ_URL_FILE: /run/secrets/rabbit_url
@@ -8,12 +7,21 @@ x-environment: &environment
   ACCESS_TOKEN_MINUTES: ${ACCESS_TOKEN_MINUTES:-15}
   REFRESH_TOKEN_DAYS: ${REFRESH_TOKEN_DAYS:-7}
   CATALOG_SERVICE_URL: http://catalog:8002
-  VALIDATION_SERVICE_URL: http://validation:8003
+  GAMIFICATION_SERVICE_URL: http://gamification:8004
+  EDGE_PUBLIC_URL: ${EDGE_PUBLIC_URL:-https://localhost:8443}
+  DEPLOYMENT_CITY: ${DEPLOYMENT_CITY:-Manaus}
+  DEPLOYMENT_TIMEZONE: ${DEPLOYMENT_TIMEZONE:-America/Manaus}
+  DEPLOYMENT_LANGUAGE: ${DEPLOYMENT_LANGUAGE:-pt-BR}
+  MAP_CENTER_LATITUDE: ${MAP_CENTER_LATITUDE:--3.119}
+  MAP_CENTER_LONGITUDE: ${MAP_CENTER_LONGITUDE:--60.0217}
 
 x-service: &service
   build: {context: ., target: runtime}
   restart: unless-stopped
   init: true
+  networks: [edge, data]
+  mem_limit: 512m
+  cpus: 1
   volumes:
     - ${SECRETS_DIR:-./secrets}/public:/run/public-keys:ro
   depends_on:
@@ -27,26 +35,29 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: passanorte
+      POSTGRES_DB: passanorte
       POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
     secrets: [postgres_password]
-    ports: ["127.0.0.1:5432:5432"]
+    networks: [data]
+    mem_limit: 768m
     volumes:
-      - pgdata:/var/lib/postgresql/data
-      - ./scripts/init-databases.sh:/docker-entrypoint-initdb.d/init-databases.sh:ro
+      - pgdata_s2:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD", "pg_isready", "-U", "passanorte"]
+      test: ["CMD", "pg_isready", "-U", "passanorte", "-d", "passanorte"]
       interval: 5s
       timeout: 3s
       retries: 10
 
   rabbitmq:
     image: rabbitmq:3.13.7-management-alpine@sha256:606d8c0d6b3c18d1da9afc53bc7cdb2a8d5486df91b5a9830e9e07626c9ae281
+    hostname: ${RABBITMQ_HOSTNAME:-rabbitmq}
     restart: unless-stopped
     entrypoint: ["/bin/sh", "-ec", "export RABBITMQ_DEFAULT_PASS=$$(cat /run/secrets/rabbit_password); exec docker-entrypoint.sh rabbitmq-server"]
     environment:
       RABBITMQ_DEFAULT_USER: passanorte
     secrets: [rabbit_password]
-    ports: ["127.0.0.1:5672:5672", "127.0.0.1:15672:15672"]
+    networks: [data]
+    mem_limit: 768m
     volumes: [rabbitmqdata:/var/lib/rabbitmq]
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
@@ -54,18 +65,52 @@ services:
       timeout: 3s
       retries: 10
 
-  migrate:
+
+  provision:
     build: {context: ., target: runtime}
-    command: ["bash", "scripts/apply_migrations.sh"]
+    command: ["python", "scripts/provision_database.py"]
+    networks: [data]
     environment:
-      APP_ENV: ${APP_ENV:-production}
-      DATABASE_URL_TEMPLATE_FILE: /run/secrets/database_template
-      RABBITMQ_URL_FILE: /run/secrets/rabbit_url
-    secrets: [database_template, rabbit_url]
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      DB_CREDENTIAL_DIR: /run/secrets
+    secrets:
+      - postgres_password
+      - {source: database_auth_migrator, target: database-auth_migrator}
+      - {source: database_catalog_migrator, target: database-catalog_migrator}
+      - {source: database_gamification_migrator, target: database-gamification_migrator}
+      - {source: database_insights_migrator, target: database-insights_migrator}
+      - {source: database_notifications_migrator, target: database-notifications_migrator}
+      - {source: database_chatbot_migrator, target: database-chatbot_migrator}
+      - {source: database_benefits_migrator, target: database-benefits_migrator}
+      - {source: database_auth_runtime, target: database-auth_runtime}
+      - {source: database_catalog_runtime, target: database-catalog_runtime}
+      - {source: database_gamification_runtime, target: database-gamification_runtime}
+      - {source: database_insights_runtime, target: database-insights_runtime}
+      - {source: database_notifications_runtime, target: database-notifications_runtime}
+      - {source: database_chatbot_runtime, target: database-chatbot_runtime}
+      - {source: database_benefits_runtime, target: database-benefits_runtime}
     depends_on:
       db: {condition: service_healthy}
 
+  migrate:
+    build: {context: ., target: runtime}
+    command: ["bash", "scripts/apply_migrations.sh"]
+    networks: [data]
+    environment:
+      DB_CREDENTIAL_DIR: /run/secrets
+    secrets:
+      - {source: database_auth_migrator, target: database-auth_migrator}
+      - {source: database_catalog_migrator, target: database-catalog_migrator}
+      - {source: database_gamification_migrator, target: database-gamification_migrator}
+      - {source: database_insights_migrator, target: database-insights_migrator}
+      - {source: database_notifications_migrator, target: database-notifications_migrator}
+      - {source: database_chatbot_migrator, target: database-chatbot_migrator}
+      - {source: database_benefits_migrator, target: database-benefits_migrator}
+    depends_on:
+      provision: {condition: service_completed_successfully}
+
   seed:
+    networks: [data]
     build: {context: ., target: runtime}
     command: ["python", "scripts/create_admin.py", "--if-missing", "--email", "${ADMIN_EMAIL:?Set ADMIN_EMAIL in .env}"]
     environment:
@@ -80,9 +125,9 @@ services:
   auth:
     <<: *service
     command: ["uvicorn", "services.auth.app.main:app", "--host", "0.0.0.0", "--port", "8001"]
-    ports: ["127.0.0.1:8001:8001"]
     environment:
       <<: *environment
+      INTERNAL_API_TOKEN_FILE: /run/secrets/internal_api_token
       DATABASE_URL_FILE: /run/secrets/database_auth
       JWT_ACTIVE_KID: ${JWT_ACTIVE_KID:?Set JWT_ACTIVE_KID}
       JWT_PRIVATE_KEY_FILE: /run/secrets/jwt_private
@@ -92,9 +137,9 @@ services:
       db: {condition: service_healthy}
       rabbitmq: {condition: service_healthy}
       seed: {condition: service_completed_successfully}
-    secrets: [database_auth, rabbit_url, jwt_private, pii, pii_hmac]
+    secrets: [database_auth, rabbit_url, internal_api_token, jwt_private, pii, pii_hmac]
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/ready')"]
       interval: 10s
       timeout: 3s
       retries: 6
@@ -103,28 +148,13 @@ services:
   catalog:
     <<: *service
     command: ["uvicorn", "services.catalog.app.main:app", "--host", "0.0.0.0", "--port", "8002"]
-    ports: ["127.0.0.1:8002:8002"]
     environment:
       <<: *environment
+      INTERNAL_API_TOKEN_FILE: /run/secrets/internal_api_token
       DATABASE_URL_FILE: /run/secrets/database_catalog
-    secrets: [database_catalog, rabbit_url]
+    secrets: [database_catalog, rabbit_url, internal_api_token]
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8002/health')"]
-      interval: 10s
-      timeout: 3s
-      retries: 6
-      start_period: 10s
-
-  validation:
-    <<: *service
-    command: ["uvicorn", "services.validation.app.main:app", "--host", "0.0.0.0", "--port", "8003"]
-    ports: ["127.0.0.1:8003:8003"]
-    environment:
-      <<: *environment
-      DATABASE_URL_FILE: /run/secrets/database_validation
-    secrets: [database_validation, rabbit_url]
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8003/health')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8002/ready')"]
       interval: 10s
       timeout: 3s
       retries: 6
@@ -133,13 +163,13 @@ services:
   gamification:
     <<: *service
     command: ["uvicorn", "services.gamification.app.main:app", "--host", "0.0.0.0", "--port", "8004"]
-    ports: ["127.0.0.1:8004:8004"]
     environment:
       <<: *environment
+      INTERNAL_API_TOKEN_FILE: /run/secrets/internal_api_token
       DATABASE_URL_FILE: /run/secrets/database_gamification
-    secrets: [database_gamification, rabbit_url]
+    secrets: [database_gamification, rabbit_url, internal_api_token]
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8004/health')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8004/ready')"]
       interval: 10s
       timeout: 3s
       retries: 6
@@ -148,13 +178,12 @@ services:
   insights:
     <<: *service
     command: ["uvicorn", "services.insights.app.main:app", "--host", "0.0.0.0", "--port", "8005"]
-    ports: ["127.0.0.1:8005:8005"]
     environment:
       <<: *environment
       DATABASE_URL_FILE: /run/secrets/database_insights
     secrets: [database_insights, rabbit_url]
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8005/health')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8005/ready')"]
       interval: 10s
       timeout: 3s
       retries: 6
@@ -163,22 +192,21 @@ services:
   notifications:
     <<: *service
     command: ["uvicorn", "services.notifications.app.main:app", "--host", "0.0.0.0", "--port", "8006"]
-    ports: ["127.0.0.1:8006:8006"]
     environment:
       <<: *environment
       DATABASE_URL_FILE: /run/secrets/database_notifications
     secrets: [database_notifications, rabbit_url]
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8006/health')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8006/ready')"]
       interval: 10s
       timeout: 3s
       retries: 6
       start_period: 10s
 
   chatbot:
+    profiles: [chatbot]
     <<: *service
     command: ["uvicorn", "services.chatbot.app.main:app", "--host", "0.0.0.0", "--port", "8007"]
-    ports: ["127.0.0.1:8007:8007"]
     environment:
       <<: *environment
       DATABASE_URL_FILE: /run/secrets/database_chatbot
@@ -187,7 +215,21 @@ services:
       LLM_OLLAMA_MODEL: ${LLM_OLLAMA_MODEL:-llama3.1}
     secrets: [database_chatbot, rabbit_url]
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8007/health')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8007/ready')"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 10s
+
+  benefits:
+    <<: *service
+    command: ["uvicorn", "services.benefits.app.main:app", "--host", "0.0.0.0", "--port", "8008"]
+    environment:
+      <<: *environment
+      DATABASE_URL_FILE: /run/secrets/database_benefits
+    secrets: [database_benefits, rabbit_url]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8008/ready')"]
       interval: 10s
       timeout: 3s
       retries: 6
@@ -203,6 +245,10 @@ services:
       KONG_PROXY_ACCESS_LOG: /dev/stdout
       KONG_PROXY_ERROR_LOG: /dev/stderr
       KONG_ADMIN_LISTEN: "off"
+      KONG_PROXY_LISTEN: "0.0.0.0:8443 ssl"
+      KONG_SSL_CERT: /run/secrets/edge_cert
+      KONG_SSL_CERT_KEY: /run/secrets/edge_key
+      EDGE_CORS_ORIGIN: ${EDGE_CORS_ORIGIN:-https://localhost:8443}
       JWT_PUBLIC_KEYS_DIR: /run/public-keys
     healthcheck:
       test: ["CMD", "kong", "health"]
@@ -210,7 +256,9 @@ services:
       timeout: 5s
       retries: 6
       start_period: 10s
-    ports: ["8000:8000"]
+    networks: [edge]
+    secrets: [edge_cert, edge_key]
+    ports: ["8443:8443"]
     volumes:
       - ./kong/kong.yml:/kong/kong.yml:ro
       - ./kong/entrypoint-render.sh:/kong/entrypoint-render.sh:ro
@@ -218,14 +266,18 @@ services:
     depends_on:
       auth: {condition: service_healthy}
       catalog: {condition: service_healthy}
-      validation: {condition: service_healthy}
       gamification: {condition: service_healthy}
       insights: {condition: service_healthy}
       notifications: {condition: service_healthy}
-      chatbot: {condition: service_healthy}
+      benefits: {condition: service_healthy}
+
+networks:
+  edge: {}
+  data:
+    internal: true
 
 volumes:
-  pgdata:
+  pgdata_s2:
   rabbitmqdata:
 
 secrets:
@@ -235,8 +287,6 @@ secrets:
     file: ${SECRETS_DIR:-./secrets}/rabbit-password
   rabbit_url:
     file: ${SECRETS_DIR:-./secrets}/rabbit-url
-  database_template:
-    file: ${SECRETS_DIR:-./secrets}/database-template
   admin_password:
     file: ${SECRETS_DIR:-./secrets}/admin-password
   jwt_private:
@@ -245,17 +295,51 @@ secrets:
     file: ${SECRETS_DIR:-./secrets}/pii.key
   pii_hmac:
     file: ${SECRETS_DIR:-./secrets}/pii-hmac.key
+  internal_api_token:
+    file: ${SECRETS_DIR:-./secrets}/internal-api-token
+  edge_cert:
+    file: ${SECRETS_DIR:-./secrets}/edge.crt
+  edge_key:
+    file: ${SECRETS_DIR:-./secrets}/edge.key
   database_auth:
-    file: ${SECRETS_DIR:-./secrets}/database-auth
+    file: ${SECRETS_DIR:-./secrets}/database-auth_runtime
   database_catalog:
-    file: ${SECRETS_DIR:-./secrets}/database-catalog
-  database_validation:
-    file: ${SECRETS_DIR:-./secrets}/database-validation
+    file: ${SECRETS_DIR:-./secrets}/database-catalog_runtime
   database_gamification:
-    file: ${SECRETS_DIR:-./secrets}/database-gamification
+    file: ${SECRETS_DIR:-./secrets}/database-gamification_runtime
   database_insights:
-    file: ${SECRETS_DIR:-./secrets}/database-insights
+    file: ${SECRETS_DIR:-./secrets}/database-insights_runtime
   database_notifications:
-    file: ${SECRETS_DIR:-./secrets}/database-notifications
+    file: ${SECRETS_DIR:-./secrets}/database-notifications_runtime
   database_chatbot:
-    file: ${SECRETS_DIR:-./secrets}/database-chatbot
+    file: ${SECRETS_DIR:-./secrets}/database-chatbot_runtime
+  database_benefits:
+    file: ${SECRETS_DIR:-./secrets}/database-benefits_runtime
+  database_auth_migrator:
+    file: ${SECRETS_DIR:-./secrets}/database-auth_migrator
+  database_catalog_migrator:
+    file: ${SECRETS_DIR:-./secrets}/database-catalog_migrator
+  database_gamification_migrator:
+    file: ${SECRETS_DIR:-./secrets}/database-gamification_migrator
+  database_insights_migrator:
+    file: ${SECRETS_DIR:-./secrets}/database-insights_migrator
+  database_notifications_migrator:
+    file: ${SECRETS_DIR:-./secrets}/database-notifications_migrator
+  database_chatbot_migrator:
+    file: ${SECRETS_DIR:-./secrets}/database-chatbot_migrator
+  database_benefits_migrator:
+    file: ${SECRETS_DIR:-./secrets}/database-benefits_migrator
+  database_auth_runtime:
+    file: ${SECRETS_DIR:-./secrets}/database-auth_runtime
+  database_catalog_runtime:
+    file: ${SECRETS_DIR:-./secrets}/database-catalog_runtime
+  database_gamification_runtime:
+    file: ${SECRETS_DIR:-./secrets}/database-gamification_runtime
+  database_insights_runtime:
+    file: ${SECRETS_DIR:-./secrets}/database-insights_runtime
+  database_notifications_runtime:
+    file: ${SECRETS_DIR:-./secrets}/database-notifications_runtime
+  database_chatbot_runtime:
+    file: ${SECRETS_DIR:-./secrets}/database-chatbot_runtime
+  database_benefits_runtime:
+    file: ${SECRETS_DIR:-./secrets}/database-benefits_runtime

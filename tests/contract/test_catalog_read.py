@@ -16,10 +16,10 @@ from services.catalog.app.main import create_test_app
 
 
 @pytest.fixture
-def client(db_session) -> TestClient:
+def client(db_session, internal_headers) -> TestClient:
     app = create_test_app()
     app.dependency_overrides[deps.get_db] = lambda: db_session
-    return TestClient(app)
+    return TestClient(app, headers=internal_headers)
 
 
 def create_spot(client: TestClient, **overrides) -> dict:

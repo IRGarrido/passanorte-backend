@@ -29,7 +29,7 @@ logger = logging.getLogger("catalog")
 require_admin = require_role("admin")
 
 
-def _index_spot(spot: TouristSpot) -> None:
+def _index_spot(db: Session, spot: TouristSpot) -> None:
     """Rebuild do embedding do ponto no chatbot — fire-and-forget (D-08)."""
     status_ = spot.status.value if hasattr(spot.status, "value") else spot.status
     refresh_index([
@@ -43,7 +43,7 @@ def _index_spot(spot: TouristSpot) -> None:
             "latitude": float(spot.latitude),
             "longitude": float(spot.longitude),
         }
-    ])
+    ], db=db)
 
 
 class TouristSpotCreate(BaseModel):
@@ -115,13 +115,13 @@ def create_spot(
         db.add(SpotCategory(spot_id=spot.id, category_id=category_id))
     record_audit(db, AuditLog, actor_id=claims["sub"], action="create_spot",
                  entity="tourist_spot", entity_id=spot.id, payload={"name": payload.name})
-    db.commit()
     log_event(logging.getLogger("catalog"), "spot_created", spot_id=spot.id, actor_id=claims["sub"])
     # RF37: inscritos nas categorias do ponto recebem notificação (fire-and-forget)
     if payload.category_ids:
-        dispatch(kind="new_spot", source_id=spot.id, title=spot.name, body=spot.description,
+        dispatch(db=db, kind="new_spot", source_id=spot.id, title=spot.name, body=spot.description,
                  category_ids=payload.category_ids, payload={"tourist_spot_id": spot.id})
-    _index_spot(spot)
+    _index_spot(db, spot)
+    db.commit()
     return {"id": spot.id, "name": spot.name, "status": spot.status.value}
 
 
@@ -145,8 +145,8 @@ def update_spot(
             db.add(SpotCategory(spot_id=spot_id, category_id=category_id))
     record_audit(db, AuditLog, actor_id=claims["sub"], action="update_spot",
                  entity="tourist_spot", entity_id=spot_id)
+    _index_spot(db, spot)
     db.commit()
-    _index_spot(spot)
     return {"id": spot.id, "name": spot.name, "status": spot.status.value}
 
 
@@ -213,8 +213,8 @@ def set_status(
     spot.status = payload.status
     record_audit(db, AuditLog, actor_id=claims["sub"], action="set_status",
                  entity="tourist_spot", entity_id=spot_id, payload={"status": payload.status.value})
+    _index_spot(db, spot)
     db.commit()
-    _index_spot(spot)  # status fechado propaga ao índice RAG (RF38)
     return {"id": spot.id, "status": spot.status.value}
 
 

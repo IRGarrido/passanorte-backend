@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 from typing import Literal
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, SecretStr
 from sqlalchemy.engine import make_url
@@ -38,7 +39,12 @@ class Settings(BaseModel):
     refresh_token_days: int = Field(default=7, ge=1, le=30)
 
     catalog_service_url: HttpUrl = HttpUrl("http://localhost:8002")
-    validation_service_url: HttpUrl = HttpUrl("http://localhost:8003")
+    deployment_city: str = Field(default="Manaus", min_length=1)
+    deployment_timezone: str = "America/Manaus"
+    deployment_language: str = "pt-BR"
+    map_center_latitude: float = Field(default=-3.119, ge=-90, le=90)
+    map_center_longitude: float = Field(default=-60.0217, ge=-180, le=180)
+    edge_public_url: HttpUrl = HttpUrl("https://localhost:8443")
     llm_provider: Literal["stub", "ollama", "gemini"] = "stub"
     llm_ollama_url: HttpUrl = HttpUrl("http://localhost:11434")
     llm_ollama_model: str = Field(default="llama3.1", min_length=1)
@@ -64,6 +70,11 @@ class Settings(BaseModel):
         broker = settings.rabbitmq_url.get_secret_value()
         if settings.app_env != "test" and not broker.startswith(("amqp://", "amqps://")):
             raise ConfigurationError("RABBITMQ_URL is required and must use amqp(s)")
+        try:
+            ZoneInfo(settings.deployment_timezone)
+        except ZoneInfoNotFoundError:
+            if os.name != "nt" or settings.deployment_timezone != "America/Manaus":
+                raise ConfigurationError("DEPLOYMENT_TIMEZONE must be an installed IANA time zone") from None
         return settings
 
 
@@ -73,9 +84,10 @@ def validate_service(service: str) -> Settings:
     settings = Settings.load()
     verification_keys()
     if settings.app_env != "test":
-        required_url = {"validation": "CATALOG_SERVICE_URL", "gamification": "VALIDATION_SERVICE_URL"}.get(service)
-        if required_url and not os.environ.get(required_url):
-            raise ConfigurationError(f"Missing {required_url}")
+        if service in {"auth", "catalog", "gamification"}:
+            secret("INTERNAL_API_TOKEN")
+        if service == "gamification" and not os.environ.get("CATALOG_SERVICE_URL"):
+            raise ConfigurationError("Missing CATALOG_SERVICE_URL")
     if service == "chatbot" and settings.llm_provider == "gemini":
         secret("LLM_GEMINI_API_KEY")
     if service == "auth":

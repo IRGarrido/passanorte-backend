@@ -58,8 +58,8 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)) -> TokenResponse
     if user is None or not user.is_active or not verify_password(payload.password, user.password_hash):
         raise ApiError(code="invalid_credentials", message="Credenciais inválidas.", status_code=401)
     response = _issue(db, user)
+    notify_access(user.id, db=db)
     db.commit()
-    notify_access(user.id)
     return response
 
 

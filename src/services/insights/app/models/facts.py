@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from sqlalchemy import DateTime, Numeric, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
-from shared.db import Base
+from services.insights.app.db import Base
 
 
 class AccessLog(Base):

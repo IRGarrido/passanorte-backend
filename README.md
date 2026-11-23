@@ -6,24 +6,20 @@ A S1 estabelece build reproduzível, configuração explícita e segurança de s
 
 ## Estado e arquitetura
 
-Sete processos FastAPI independentes, Kong DB-less na borda, PostgreSQL 16/pgvector e RabbitMQ. Imagens fixadas por digest; Python 3.11.17; dependências em `uv.lock`. O runtime roda como UID 10001 e não contém uv, pytest, ruff ou mypy.
+Sete processos FastAPI compartilham um banco PostgreSQL 16 com pgvector e um schema por domínio. Só Kong publica uma porta no host, com HTTPS em 8443. RabbitMQ distribui eventos persistentes. As imagens são fixadas por digest e o runtime roda como UID 10001.
 
-| Componente | Porta local | Responsabilidade atual |
-| --- | --- | --- |
-| Kong | 8000 | Roteamento /api/v1, JWT RS256, CORS, limite de requisições |
-| auth | 8001 | Identidade, sessões, perfis e RBAC legado |
-| catalog | 8002 | Pontos, categorias, eventos e ingressos |
-| validation | 8003 | Validação de visitas |
-| gamification | 8004 | Rotas, progresso e resgates legados |
-| insights | 8005 | Indicadores e projeções |
-| notifications | 8006 | Notificações e consumidor RabbitMQ |
-| chatbot | 8007 | Adaptadores existentes; stub por padrão |
-| PostgreSQL | 5432 | Persistência |
-| RabbitMQ | 5672 / 15672 | AMQP / console administrativo |
+```mermaid
+flowchart TD
+    Cliente --> Kong
+    Kong --> Apps["Seis serviços do MVP"]
+    Kong --> Chatbot["Chatbot opcional"]
+    Apps --> PG["PostgreSQL com schemas por domínio"]
+    Chatbot --> PG
+    Apps --> Rabbit["RabbitMQ com filas duráveis"]
+    Chatbot --> Rabbit
+```
 
-Portas de serviços, banco e RabbitMQ são publicadas somente em 127.0.0.1. A porta 8000 é a entrada externa. TLS e políticas de exposição de produção devem ser configurados no ambiente de implantação.
-
-**Transição planejada:** ainda existem sete databases e credencial de banco compartilhada. A S2 migra para **um database com schemas, ownership e usuários por domínio**. `employee` e brindes físicos ainda são legado a remover nas sprints próprias; o destino é Administrador, Fornecedor e Turista, sem brinde físico. Benefícios, Parceiros, Fornecedores e Guaranás seguem o plano. Notificações RabbitMQ pertencem ao MVP. Chatbot com Ollama/RAG é a última etapa, S8.
+[Limites dos sete serviços e ownership](docs/architecture/ADR-002-S2-service-boundaries.md)
 
 ## Primeiro uso local
 
@@ -37,14 +33,14 @@ uv sync --frozen
 uv run --frozen python scripts/generate_secrets.py
 docker compose config --quiet
 docker compose up --build -d --wait --wait-timeout 180
-uv run --frozen python scripts/smoke_s1.py
+uv run --frozen python scripts/smoke_s2.py --email admin@example.com
 ```
 
 Em Linux/macOS use `cp .env.example .env`. O admin padrão de desenvolvimento usa o **email** admin@example.com; sua senha aleatória está no arquivo local `secrets/admin-password`, nunca nos logs. Leia-a privadamente para entrar. O gerador recusa diretório já existente, preservando chaves persistentes.
 
 O script gera arquivos de desenvolvimento; produção deve provisionar os equivalentes via secret manager. Proteja a pasta com ACLs do host. Os arquivos são legíveis pelo UID do contêiner; no Linux a pasta pai privada restringe acesso no host. Não coloque segredos no Dockerfile, argumentos de build, Git, linha de comando ou logs.
 
-`migrate` aplica Alembic por serviço, `seed` cria o admin somente se ausente, e a stack inicia os serviços após essas etapas. Um email existente de outro papel ou admin desativado causa falha, sem promoção nem reativação implícita.
+`provision` cria papéis e schemas, `migrate` aplica Alembic por serviço, `seed` cria o admin somente se ausente, e a stack inicia os serviços após essas etapas. Um email existente de outro papel ou admin desativado causa falha, sem promoção nem reativação implícita.
 
 Para parar mantendo os dados: `docker compose down`. **Não remova volumes ou regenere chaves para corrigir inicialização.** Credenciais de volumes existentes não são alteradas automaticamente pelo Compose; veja o procedimento de transição no ADR.
 
@@ -64,9 +60,11 @@ Para parar mantendo os dados: `docker compose down`. **Não remova volumes ou re
 | PII_ENCRYPTION_KEY_FILE | Somente auth; chave Fernet ou lista ordenada nova,antiga durante rotação |
 | PII_HMAC_KEY_FILE | Somente auth; chave independente, pelo menos 32 bytes |
 | ADMIN_PASSWORD_FILE | Somente seed; entrada oculta também disponível no CLI interativo |
-| DATABASE_URL_TEMPLATE_FILE | Somente migrate; template contendo {svc} |
-| CATALOG_SERVICE_URL | validation; obrigatório fora de test |
-| VALIDATION_SERVICE_URL | gamification; obrigatório fora de test |
+| DB_CREDENTIAL_DIR | Provisionamento e migrations com arquivo por domínio e papel |
+| CATALOG_SERVICE_URL / GAMIFICATION_SERVICE_URL | Endereços privados das APIs internas |
+| INTERNAL_API_TOKEN_FILE | Token compartilhado para HTTP interno |
+| EDGE_PUBLIC_URL / EDGE_CORS_ORIGIN | URL HTTPS usada no OpenAPI e origem permitida por CORS |
+| RABBITMQ_HOSTNAME | Nome estável do nó. Para reutilizar um volume legado do RabbitMQ, preserve o hostname original antes de recriar o contêiner |
 | LLM_PROVIDER | chatbot: stub, ollama ou adaptador legado gemini |
 | LLM_OLLAMA_URL / LLM_OLLAMA_MODEL | Nomes reais usados pelo adaptador Ollama |
 | LLM_GEMINI_API_KEY_FILE | Somente para uso explícito do adaptador legado; não montado por padrão |
@@ -76,9 +74,9 @@ Segredos também aceitam o nome sem `_FILE` para integração com gerenciadores 
 
 ## API e autenticação
 
-Swagger por serviço: http://localhost:8001/docs até http://localhost:8007/docs. O schema está em `/openapi.json`; `/health` é liveness, não comprova conectividade de todas as dependências. A exposição consolidada de documentação via Kong pertence à S2.
+Em `development` ou `test`, use `https://localhost:8443/docs/{service}` e `https://localhost:8443/openapi/{service}.json`. Confie no certificado de desenvolvimento para o ambiente local. Abra o [Swagger de Identidade](https://localhost:8443/docs/auth), execute `POST /api/v1/session` com **Try it out** e use o `access_token` em **Authorize** para testar `GET /api/v1/me`. O schema usa `EDGE_PUBLIC_URL`. Em produção, Swagger e OpenAPI ficam desabilitados. O perfil `chatbot` habilita a documentação do Chatbot. Kong reserva `/me/balance` e `/me/coupons` para Benefícios.
 
-Rotas principais de auth, com prefixo `http://localhost:8000/api/v1`:
+Rotas principais de identidade sob `https://localhost:8443/api/v1`:
 
 | Método / rota | Contrato |
 | --- | --- |
@@ -102,9 +100,46 @@ uv run --frozen ruff check src tests scripts
 uv run --frozen mypy src
 uv run --frozen pytest -q
 uv run --frozen python scripts/check_secrets.py
-uv run --frozen python scripts/smoke_s1.py
+uv run --frozen python scripts/smoke_s2.py --email admin@example.com
 ```
 
 O scanner usa Docker/Gitleaks fixado por digest e analisa a árvore de trabalho visível ao Git (incluindo arquivos novos não ignorados), com achados redigidos. Não certifica o histórico Git nem arquivos locais ignorados. Os testes unitários/contrato usam SQLite e chaves efêmeras geradas exclusivamente nas fixtures; o smoke usa PostgreSQL, RabbitMQ e Kong reais.
 
 A [CI](.github/workflows/ci.yml) executa lock, lint, tipagem, testes, scan, build e smoke. Documentos de serviços antigos podem conter nomenclatura anterior; este README e o plano prevalecem até sua revisão nas respectivas sprints.
+
+Para verificar a recuperação em uma stack de desenvolvimento já iniciada com `.env.example`, execute `bash scripts/verify_s2_recovery.sh`. No PowerShell com Git para Windows, use `& "C:\Program Files\Git\bin\bash.exe" scripts/verify_s2_recovery.sh`. O ensaio interrompe o RabbitMQ, confirma o registro de um evento na outbox durante a interrupção, verifica o reinício automático de Identidade e confirma que o mesmo evento chegou à inbox de Indicadores após a recuperação.
+
+## Migração e reconciliação
+
+Para ensaiar a migração com dados fictícios, execute `bash scripts/verify_s2_migration.sh`. O script usa as revisões históricas da S1, cria um projeto Compose temporário e verifica reversão, aplicação e repetição da migração. Os relatórios JSON saem no terminal e o ambiente temporário é removido no fim.
+
+Restaure cópias congeladas dos sete bancos S1 em um ambiente isolado. Prepare um alvo S2 vazio com `provision` e `migrate`. Importe antes de executar `seed` e preserve as chaves PII que abrem os dados das cópias.
+
+Prepare arquivos privados com DSNs no formato `postgresql://`. No diretório de origem, use os nomes `auth.dsn`, `catalog.dsn`, `gamification.dsn`, `validation.dsn`, `insights.dsn`, `notifications.dsn` e `chatbot.dsn`. O DSN do alvo aponta para o banco `passanorte` isolado, acessado por uma conta de implantação.
+
+```bash
+uv run --frozen python scripts/migrate_legacy.py --source-dir /seguro/s1 \
+  --target-dsn-file /seguro/s2.dsn --report /seguro/reconciliacao.json
+```
+
+O ensaio compara contagens, conteúdo e vínculos e registra a quantidade de contas `employee`. Por padrão a transação é revertida. Para persistir a importação no alvo isolado, use `--commit` e um novo caminho para o relatório. Uma divergência reverte toda a importação.
+
+## Backup, restauração e diagnóstico
+
+```bash
+umask 077
+docker compose exec -T db pg_dump -U passanorte -C -Fc -d passanorte > passanorte.dump
+bash scripts/verify_s2_restore.sh
+docker compose exec -T db psql -X -v ON_ERROR_STOP=1 -U passanorte -d passanorte < scripts/verify_s2_privileges.sql
+```
+
+O ensaio restaura em um banco temporário do mesmo cluster, compara o snapshot e verifica a separação dos schemas. Em recuperação para um cluster vazio, recrie os papéis do ambiente, preserve chaves e credenciais e restaure o backup com `pg_restore -U passanorte -d postgres --create --exit-on-error`. Após restaurar, execute a verificação de privilégios e o smoke HTTPS antes de direcionar o tráfego.
+
+| Sintoma | Diagnóstico |
+| --- | --- |
+| Falha na inicialização | Consulte `docker compose ps -a` e `docker compose logs provision migrate seed` |
+| Processo responde, mas está indisponível | `/health` indica processo vivo. `/ready` verifica a tabela de entrega e a conexão ao broker |
+| Swagger retorna 404 | Confira `APP_ENV`, o nome do serviço e o perfil `chatbot` |
+| Certificado recusado | Confira o hostname de `EDGE_PUBLIC_URL` e passe a CA ao smoke com `--ca` |
+| Evento pendente | Consulte a outbox e os logs `outbox_retry` |
+| Evento na DLQ | Identifique tipo, versão e `event_id`. Preserve o ID e o correlation ID em eventual reenvio |

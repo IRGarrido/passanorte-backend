@@ -90,17 +90,19 @@ def mark_visit(
         )
         db.add(visit)
         db.flush()
-        db.commit()
         log_event(logger, "visit_validated", user_id=claims["sub"], spot_id=payload.tourist_spot_id,
                   distance_m=round(distance_m, 2))
         # propagação do fato via barramento RabbitMQ (D-05): insights consome
-        propagate(
-            {
-                "user_id": claims["sub"],
-                "tourist_spot_id": payload.tourist_spot_id,
-                "occurred_at": str(visit.occurred_at),
-            }
-        )
+        fact = {
+            "user_id": claims["sub"],
+            "tourist_spot_id": payload.tourist_spot_id,
+            "occurred_at": str(visit.occurred_at),
+        }
+        if propagate is get_propagator():
+            propagate(fact, db=db)
+        else:
+            propagate(fact)
+        db.commit()
         return {
             "id": visit.id,
             "tourist_spot_id": visit.tourist_spot_id,
