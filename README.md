@@ -42,7 +42,17 @@ O script gera arquivos de desenvolvimento; produção deve provisionar os equiva
 
 `provision` cria papéis e schemas, `migrate` aplica Alembic por serviço, `seed` cria o admin somente se ausente, e a stack inicia os serviços após essas etapas. Um email existente de outro papel ou admin desativado causa falha, sem promoção nem reativação implícita.
 
-Para parar mantendo os dados: `docker compose down`. **Não remova volumes ou regenere chaves para corrigir inicialização.** Credenciais de volumes existentes não são alteradas automaticamente pelo Compose; veja o procedimento de transição no ADR.
+Para parar mantendo os dados: `docker compose down`. Credenciais de volumes existentes não são alteradas automaticamente pelo Compose; veja o procedimento de transição no ADR quando precisar preservar os dados.
+
+Para reconstruir o ambiente local descartando os dados antigos, depois de configurar `.env` e executar `uv sync --frozen`:
+
+```powershell
+uv run --frozen python scripts/bootstrap.py --reset-data
+```
+
+Esse comando remove os volumes PostgreSQL e RabbitMQ do projeto Compose atual, preserva os arquivos de segredos e recria a stack com essas credenciais. Remover somente os containers não remove as senhas persistidas nos volumes. O script gera os segredos apenas quando o diretório inteiro está ausente; um conjunto incompleto causa erro antes de remover volumes. Em seguida executa a build, aguarda a inicialização por até 180 segundos e roda `smoke_s2.py` com o email e os caminhos de segredos resolvidos pelo Compose. O comando é restrito a `APP_ENV=development`.
+
+Sem `--reset-data`, o mesmo script inicia e valida o ambiente preservando os volumes. O healthcheck do PostgreSQL verifica autenticação com o segredo montado, de modo que uma senha incompatível impede o provisionamento de avançar.
 
 ## Configuração
 
