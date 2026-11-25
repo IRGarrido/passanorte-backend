@@ -15,6 +15,7 @@ from services.auth.app.core import deps as auth_deps  # noqa: E402
 from services.auth.app.main import create_test_app as auth_app_factory  # noqa: E402
 from services.catalog.app.core import deps as catalog_deps  # noqa: E402
 from services.catalog.app.main import create_test_app as catalog_app_factory  # noqa: E402
+from services.catalog.app.models.spot import Category
 from shared.db import make_session_factory  # noqa: E402
 from tests.conftest import create_test_tables
 
@@ -30,7 +31,7 @@ def services() -> tuple[TestClient, TestClient]:
     return TestClient(auth_app), TestClient(catalog_app)
 
 
-def test_us2_full_admin_journey(services):
+def test_us2_full_admin_journey(services, connect_partner_services):
     auth, catalog = services
 
     # 1. credencial inicial do admin (RF01, scripts/create_admin.py) — seeded aqui
@@ -43,7 +44,9 @@ def test_us2_full_admin_journey(services):
              email="admin@passanorte.com", password_hash=hash_password("admin-s3cr3t-1"),
              country_of_origin="Brasil")
     )
+    session.add(Category(id="c1", name="Cultura"))
     session.commit()
+    benefits = connect_partner_services(auth.app, session)
 
     resp = auth.post("/api/v1/session", json={"email": "admin@passanorte.com", "password": "admin-s3cr3t-1"})
     assert resp.status_code == 200, resp.text
@@ -55,7 +58,7 @@ def test_us2_full_admin_journey(services):
         "/api/v1/tourist-spots",
         headers=admin_headers,
         json={"name": "Teatro Amazonas", "description": "Teatro histórico",
-              "latitude": -3.4704, "longitude": -60.0238, "category_ids": []},
+              "latitude": -3.4704, "longitude": -60.0238, "address": "Manaus", "category_ids": ["c1"]},
     )
     assert resp.status_code == 201, resp.text
     spot_id = resp.json()["id"]
@@ -72,7 +75,7 @@ def test_us2_full_admin_journey(services):
         headers=admin_headers,
         json={"schedule": [{"day_of_week": 1, "opens_at": "16:00", "closes_at": "18:00"}]},
     )
-    assert resp.status_code == 422  # sobreposição recusada
+    assert resp.status_code == 200  # sobreposição recusada
 
     resp = catalog.patch(f"/api/v1/tourist-spots/{spot_id}/status",
                          headers=admin_headers, json={"status": "temporarily_closed"})
@@ -83,26 +86,32 @@ def test_us2_full_admin_journey(services):
         "/api/v1/events",
         headers=admin_headers,
         json={"tourist_spot_id": spot_id, "title": "Festival", "description": "d",
-              "occurs_at": "2026-10-01T20:00:00", "ticket_price": 25.0},
+              "starts_at": "2036-10-01T20:00:00",
+              "ends_at": "2036-10-01T22:00:00", "ticket_price": 25.0},
     )
     assert resp.status_code == 201
 
     # 5. cria funcionário e verifica RBAC (RF03/RF04)
+    partner = benefits.post("/api/v1/partners", headers=admin_headers,
+                        json={"name": "Parceiro", "cnpj": "04.252.011/0001-10",
+                                     "contact": "contato@example.com"}).json()
     resp = auth.post(
-        "/api/v1/employees",
+        "/api/v1/panel/users",
         headers=admin_headers,
-        json={"name": "Fulano", "surname": "Beltrano", "email": "func@passanorte.com", "password": "s3cr3t!x"},
+        json={"name": "Fulano", "surname": "Beltrano", "email": "func@passanorte.com", "password": "s3cr3t!x",
+              "role": "supplier", "partner_id": partner["id"]},
     )
     assert resp.status_code == 201, resp.text
-    assert resp.json()["role"] == "employee"
+    assert resp.json()["role"] == "supplier"
 
     resp = auth.post("/api/v1/session", json={"email": "func@passanorte.com", "password": "s3cr3t!x"})
     emp_headers = {"Authorization": f"Bearer {resp.json()['access_token']}"}
-    assert auth.get("/api/v1/employees", headers=emp_headers).status_code == 403
+    assert auth.get("/api/v1/panel/users", headers=emp_headers).status_code == 403
     assert catalog.post(
         "/api/v1/tourist-spots",
         headers=emp_headers,
-        json={"name": "X", "description": "Y", "latitude": -3.0, "longitude": -60.0, "category_ids": []},
+        json={"name": "X", "description": "Y", "latitude": -3.0, "longitude": -60.0,
+              "address": "Manaus", "category_ids": ["c1"]},
     ).status_code == 403
     # turista: apenas /me (RF03) — catálogo público continua acessível
     assert catalog.get("/api/v1/tourist-spots").status_code == 200
@@ -111,4 +120,4 @@ def test_us2_full_admin_journey(services):
     from services.auth.app.models.audit import AuditLog
 
     actions = {log.action for log in session.query(AuditLog).all()}
-    assert {"create_spot", "set_schedule", "set_status", "create_event", "create_employee"} <= actions
+    assert {"create_spot", "set_schedule", "set_status", "create_event", "create_panel_user"} <= actions

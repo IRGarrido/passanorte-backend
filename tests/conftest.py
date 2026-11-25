@@ -133,6 +133,9 @@ def _deliver(service: str, db: Session, event: dict[str, Any]) -> bool:
         if event["type"] == "access.registered":
             insights_handlers.ingest_access(db, event["data"])
             return True
+        if event["type"] == "tourist.login":
+            insights_handlers.ingest_tourist_login(db, event["data"])
+            return True
     elif service == "notifications":
         from services.notifications.app.core import dispatcher
 
@@ -151,6 +154,32 @@ def _deliver(service: str, db: Session, event: dict[str, Any]) -> bool:
 @pytest.fixture
 def internal_headers() -> dict[str, str]:
     return {"X-Internal-Token": os.environ["INTERNAL_API_TOKEN"]}
+
+
+@pytest.fixture
+def connect_partner_services(internal_headers):
+    from fastapi.testclient import TestClient
+
+    from services.auth.app.core.partners import get_partner_lookup
+    from services.benefits.app.api.partners import get_db
+    from services.benefits.app.main import app
+
+    def connect(auth_app, session):
+        app.dependency_overrides[get_db] = lambda: session
+        client = TestClient(app)
+
+        def lookup(partner_id):
+            response = client.get(f"/api/v1/internal/partners/{partner_id}", headers=internal_headers)
+            if response.status_code == 404:
+                return None
+            return response.raise_for_status().json()
+
+        auth_app.dependency_overrides[get_partner_lookup] = lambda: lookup
+        return client
+
+    yield connect
+
+    app.dependency_overrides.clear()
 
 
 @pytest.fixture

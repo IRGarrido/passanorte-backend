@@ -7,6 +7,8 @@ x-environment: &environment
   ACCESS_TOKEN_MINUTES: ${ACCESS_TOKEN_MINUTES:-15}
   REFRESH_TOKEN_DAYS: ${REFRESH_TOKEN_DAYS:-7}
   CATALOG_SERVICE_URL: http://catalog:8002
+  AUTH_SERVICE_URL: http://auth:8001
+  BENEFITS_SERVICE_URL: http://benefits:8008
   GAMIFICATION_SERVICE_URL: http://gamification:8004
   EDGE_PUBLIC_URL: ${EDGE_PUBLIC_URL:-https://localhost:8443}
   DEPLOYMENT_CITY: ${DEPLOYMENT_CITY:-Manaus}
@@ -236,7 +238,8 @@ services:
     environment:
       <<: *environment
       DATABASE_URL_FILE: /run/secrets/database_benefits
-    secrets: [database_benefits, rabbit_url]
+      INTERNAL_API_TOKEN_FILE: /run/secrets/internal_api_token
+    secrets: [database_benefits, rabbit_url, internal_api_token]
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8008/ready')"]
       interval: 10s

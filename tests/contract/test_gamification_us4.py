@@ -47,8 +47,8 @@ def tourist_headers() -> dict:
     return headers_for("tourist", "user-1")
 
 
-def employee_headers() -> dict:
-    return headers_for("employee", "emp-1")
+def supplier_headers() -> dict:
+    return headers_for("supplier", "emp-1")
 
 
 def create_route(catalog, client, points=SPOTS, stock=5) -> dict:
@@ -168,14 +168,14 @@ def test_redemption_flow(client, catalog, db_session):
     db_session.add(RedeemCode(code=code, user_id="user-1", route_id=route["id"], prize_id=prize_id))
     db_session.commit()
 
-    ok = client.post("/api/v1/redemptions", headers=employee_headers(), json={"code": code})
+    ok = client.post("/api/v1/redemptions", headers=supplier_headers(), json={"code": code})
     assert ok.status_code == 200, ok.text
     assert ok.json()["status"] == "redeemed"
 
-    reused = client.post("/api/v1/redemptions", headers=employee_headers(), json={"code": code})
+    reused = client.post("/api/v1/redemptions", headers=supplier_headers(), json={"code": code})
     assert reused.status_code == 409
 
-    unknown = client.post("/api/v1/redemptions", headers=employee_headers(), json={"code": "INEXISTENTE"})
+    unknown = client.post("/api/v1/redemptions", headers=supplier_headers(), json={"code": "INEXISTENTE"})
     assert unknown.status_code == 404
 
     # estoque não pode ficar negativo: restava 1, foi baixado para 0
@@ -183,6 +183,6 @@ def test_redemption_flow(client, catalog, db_session):
     assert db_session.query(Prize).first().stock_quantity == 1
 
 
-def test_redemption_requires_employee_role(client):
+def test_redemption_requires_supplier_role(client):
     resp = client.post("/api/v1/redemptions", headers=tourist_headers(), json={"code": "X"})
     assert resp.status_code == 403

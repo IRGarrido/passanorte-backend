@@ -92,7 +92,7 @@ def decode_token(token: str, expected_type: str = "access") -> dict:
         token, key, algorithms=[JWT_ALGORITHM], issuer=settings.jwt_issuer, audience=settings.jwt_audience,
         options={"require": ["exp", "iat", "sub", "iss", "aud", "type", "role", "jti"], "strict_aud": True},
     )
-    if claims["type"] != expected_type or any(
+    if claims["type"] != expected_type or claims["role"] not in ("admin", "supplier", "tourist") or any(
         not isinstance(claims[name], str) or not claims[name] for name in ("sub", "role", "jti")
     ):
         raise jwt.InvalidTokenError("Invalid token claims")

@@ -67,6 +67,7 @@ class EmbeddedContent(Base):
     longitude: Mapped[float | None] = mapped_column(Float)
     ticket_price: Mapped[float | None] = mapped_column(Float)
     occurs_at: Mapped[object | None] = mapped_column(DateTime, nullable=True)
+    ends_at: Mapped[object | None] = mapped_column(DateTime, nullable=True)
     schedule_text: Mapped[str | None] = mapped_column(String(500))
     embedding: Mapped[object] = mapped_column(EmbeddingType())
     embedded_at: Mapped[object] = mapped_column(DateTime, default=lambda: datetime.now(UTC))

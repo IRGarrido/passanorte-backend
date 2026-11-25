@@ -52,7 +52,7 @@ def test_us4_full_gamification_cycle(services):
     catalog, validation, gamification = services
     admin = _headers("admin", "admin-1")
     tourist = _headers("tourist", "user-7")
-    employee = _headers("employee", "emp-2")
+    supplier = _headers("supplier", "emp-2")
 
     # 1. admin cadastra rota com brinde e estoque (RF18)
     resp = catalog.post(
@@ -101,10 +101,10 @@ def test_us4_full_gamification_cycle(services):
     assert len(gamification.get("/api/v1/redeem-codes", headers=tourist).json()["items"]) == 1
 
     # 5. funcionário resgata o código → estoque baixa para 0 (RF21)
-    resp = gamification.post("/api/v1/redemptions", headers=employee, json={"code": redeem_code})
+    resp = gamification.post("/api/v1/redemptions", headers=supplier, json={"code": redeem_code})
     assert resp.status_code == 200, resp.text
     assert resp.json()["status"] == "redeemed"
 
     # reuso do mesmo código → 409 (FR-027)
-    resp = gamification.post("/api/v1/redemptions", headers=employee, json={"code": redeem_code})
+    resp = gamification.post("/api/v1/redemptions", headers=supplier, json={"code": redeem_code})
     assert resp.status_code == 409

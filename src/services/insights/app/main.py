@@ -22,6 +22,10 @@ def create_test_app() -> FastAPI:
                 service="insights", routing_key="access.registered",
                 handler=handlers.ingest_access, transactional=True,
             ),
+            ConsumerSpec(
+                service="insights", routing_key="tourist.login",
+                handler=handlers.ingest_tourist_login, transactional=True,
+            ),
         ],
     )
 

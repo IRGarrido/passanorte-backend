@@ -124,7 +124,7 @@ def main() -> None:
                         target_schema = "catalog"
                     report["tables"].append(copy_table(source, target, target_schema, name))
             report["cross_domain_links"] = unmatched_links(target)
-            count = target.execute("SELECT count(*) FROM auth.users WHERE role = 'employee'").fetchone()[0]
+            count = target.execute("SELECT count(*) FROM auth.users WHERE role::text = 'employee'").fetchone()[0]
             report["legacy_employee_accounts"] = count
             if any(link["unmatched"] for link in report["cross_domain_links"]):
                 current = "cross-domain links"

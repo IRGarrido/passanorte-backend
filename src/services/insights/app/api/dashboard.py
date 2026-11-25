@@ -14,7 +14,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from services.insights.app.core.deps import get_db, require_role
-from services.insights.app.models.facts import AccessLog, VisitFact
+from services.insights.app.models.facts import AccessLog, TouristLogin, VisitFact
 
 router = APIRouter(tags=["dashboard"])
 
@@ -98,8 +98,13 @@ def accesses(
         count = db.query(func.count(AccessLog.id)).filter(
             AccessLog.occurred_at >= start, AccessLog.occurred_at < end
         ).scalar()
-        by_period.append({"period": period, "start": start.isoformat(), "count": int(count)})
-        total += int(count)
+        logins = db.query(func.count(TouristLogin.id)).filter(
+            TouristLogin.occurred_at >= start, TouristLogin.occurred_at < end,
+        ).scalar()
+        bucket = int(count) + int(logins)
+        by_period.append({"period": period, "start": start.isoformat(), "count": bucket,
+                          "tourist_logins": int(logins)})
+        total += bucket
     return {"total": total, "by_period": by_period}
 
 

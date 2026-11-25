@@ -42,6 +42,16 @@ def main() -> None:
                      "DATABASE_URL": url.render_as_string(hide_password=False)},
             )
         (files / "target.dsn").write_text(target_dsn)
+        with psycopg.connect((files / "auth.dsn").read_text()) as auth:
+            auth.execute(
+                "INSERT INTO users (id, role, name, surname, email, password_hash, country_of_origin, is_active) "
+                "VALUES ('employee-s2', 'employee', 'Pessoa', 'Fictícia', 'legacy@example.com', "
+                "'fixture', 'Brasil', true)"
+            )
+            auth.execute(
+                "INSERT INTO refresh_sessions (jti_hash, family_id, user_id, expires_at, revoked) "
+                "VALUES ('legacy-session-s2', 'legacy-family-s2', 'employee-s2', 4102444800, false)"
+            )
         with psycopg.connect((files / "catalog.dsn").read_text()) as catalog:
             catalog.execute(
                 "INSERT INTO tourist_spots "
@@ -60,6 +70,10 @@ def main() -> None:
                 "INSERT INTO route_points (id, route_id, tourist_spot_id, position, is_active) "
                 "VALUES ('point-s2', 'route-s2', 'spot-s2', 1, true)"
             )
+            gamification.execute(
+                "INSERT INTO audit_logs (id, actor_id, action, entity, entity_id, occurred_at) "
+                "VALUES ('audit-s2', 'employee-s2', 'redeem', 'prize', 'prize-s2', '2026-01-02T03:04:05')"
+            )
         command = [
             sys.executable, "/app/scripts/migrate_legacy.py",
             "--source-dir", str(files), "--target-dsn-file", str(files / "target.dsn"),
@@ -76,6 +90,7 @@ def main() -> None:
                 assert len(report["tables"]) == sum(map(len, TABLES.values()))
                 assert all(table["exact_match"] for table in report["tables"])
                 assert all(link["unmatched"] == 0 for link in report["cross_domain_links"])
+                assert report["legacy_employee_accounts"] == 1
                 point = target.execute(
                     "SELECT p.id, r.id, s.id, r.prize_id FROM catalog.route_points p "
                     "JOIN catalog.routes r ON r.id = p.route_id "
