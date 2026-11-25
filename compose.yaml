@@ -15,6 +15,14 @@ x-environment: &environment
   MAP_CENTER_LATITUDE: ${MAP_CENTER_LATITUDE:--3.119}
   MAP_CENTER_LONGITUDE: ${MAP_CENTER_LONGITUDE:--60.0217}
 
+# Bootstrap jobs only depend on earlier jobs/database, never on API readiness.
+# generate_secrets.py runs on the host before Compose resolves file-backed secrets.
+x-bootstrap: &bootstrap
+  build: {context: ., target: runtime}
+  restart: "no"
+  init: true
+  networks: [data]
+
 x-service: &service
   build: {context: ., target: runtime}
   restart: unless-stopped
@@ -43,7 +51,10 @@ services:
     volumes:
       - pgdata_s2:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD", "pg_isready", "-U", "passanorte", "-d", "passanorte"]
+      # Verify the mounted credential over TCP; pg_isready does not check passwords.
+      test:
+        - CMD-SHELL
+        - 'PGPASSWORD="$$(cat "$$POSTGRES_PASSWORD_FILE")" psql -h 127.0.0.1 -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -w -X -v ON_ERROR_STOP=1 -c "SELECT 1" >/dev/null 2>&1'
       interval: 5s
       timeout: 3s
       retries: 10
@@ -67,9 +78,8 @@ services:
 
 
   provision:
-    build: {context: ., target: runtime}
+    <<: *bootstrap
     command: ["python", "scripts/provision_database.py"]
-    networks: [data]
     environment:
       POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
       DB_CREDENTIAL_DIR: /run/secrets
@@ -93,9 +103,8 @@ services:
       db: {condition: service_healthy}
 
   migrate:
-    build: {context: ., target: runtime}
+    <<: *bootstrap
     command: ["bash", "scripts/apply_migrations.sh"]
-    networks: [data]
     environment:
       DB_CREDENTIAL_DIR: /run/secrets
     secrets:
@@ -110,12 +119,12 @@ services:
       provision: {condition: service_completed_successfully}
 
   seed:
-    networks: [data]
-    build: {context: ., target: runtime}
+    <<: *bootstrap
     command: ["python", "scripts/create_admin.py", "--if-missing", "--email", "${ADMIN_EMAIL:?Set ADMIN_EMAIL in .env}"]
     environment:
       APP_ENV: ${APP_ENV:-production}
       DATABASE_URL_FILE: /run/secrets/database_auth
+      # Settings validates the URL; create_admin does not connect to RabbitMQ.
       RABBITMQ_URL_FILE: /run/secrets/rabbit_url
       ADMIN_PASSWORD_FILE: /run/secrets/admin_password
     secrets: [database_auth, rabbit_url, admin_password]

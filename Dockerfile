@@ -13,6 +13,11 @@ WORKDIR /app
 COPY --from=builder --chown=app:app /app/.venv /app/.venv
 COPY --chown=app:app src /app/src
 COPY --chown=app:app scripts/apply_migrations.sh scripts/create_admin.py scripts/rotate_pii.py scripts/provision_database.py scripts/migrate_legacy.py /app/scripts/
+# Bootstrap runs at container startup, after PostgreSQL is healthy. Never run
+# provisioning/migrations here: image builds have no database or mounted secrets.
+# Accept Windows checkouts and fail the build early if Bash/script syntax is missing.
+RUN sed -i 's/\r$//' /app/scripts/apply_migrations.sh \
+    && bash -n /app/scripts/apply_migrations.sh
 ENV PATH="/app/.venv/bin:$PATH" PYTHONPATH=/app/src PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
 USER app
 CMD ["uvicorn", "services.auth.app.main:app", "--host", "0.0.0.0", "--port", "8001"]
