@@ -68,19 +68,26 @@ def s2_secrets() -> dict[str, bytes]:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--directory", type=Path, default=Path("secrets"))
-    parser.add_argument("--add-s2", action="store_true", help="Extend an existing S1 secret directory")
+    stage = parser.add_mutually_exclusive_group()
+    stage.add_argument("--add-s2", action="store_true", help="Extend an existing S1 secret directory")
+    stage.add_argument("--add-s4", action="store_true", help="Add the S4 reward-signing credential")
     args = parser.parse_args()
     root = args.directory
-    if args.add_s2:
+    s4 = {"rewards-signing-key": secrets.token_urlsafe(48).encode()}
+    if args.add_s4:
+        if not root.is_dir():
+            parser.error("--add-s4 requires the existing secrets directory")
+        files = s4
+    elif args.add_s2:
         if not root.is_dir():
             parser.error("--add-s2 requires the existing S1 secrets directory")
-        files = s2_secrets()
+        files = {**s2_secrets(), **s4}
     else:
         if root.exists():
             parser.error("Destination already exists")
         root.mkdir(mode=0o700, parents=True)
         (root / "public").mkdir(mode=0o755)
-        files = {**s1_secrets(), **s2_secrets()}
+        files = {**s1_secrets(), **s2_secrets(), **s4}
     if any((root / name).exists() for name in files):
         parser.error("An output secret already exists")
     for name, value in files.items():

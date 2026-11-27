@@ -25,6 +25,11 @@ tar -cf - -C "$scratch" src verify_s2_migration.py |
     tar -xf - -C "$legacy"
     PYTHONPATH=/app/scripts python "$legacy/verify_s2_migration.py"
   '
-"${compose[@]}" run --rm --no-deps -T migrate
+"${compose[@]}" run --rm --no-deps -T migrate bash scripts/apply_migrations.sh --s3
 "${compose[@]}" exec -T db psql -X -v ON_ERROR_STOP=1 -U passanorte -d passanorte < scripts/verify_s3_migration.sql
 echo "S3 legacy identities, actor history and category seed checks passed."
+if [[ "${1:-}" == "--s4" ]]; then
+  "${compose[@]}" run --rm --no-deps -T migrate
+  "${compose[@]}" exec -T db psql -X -v ON_ERROR_STOP=1 -U passanorte -d passanorte < scripts/verify_s4_migration.sql
+  echo "S4 legacy progress, wallet and raw GPS removal checks passed."
+fi

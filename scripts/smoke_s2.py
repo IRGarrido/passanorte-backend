@@ -48,7 +48,10 @@ def main() -> None:
         for path in ("balance", "coupons"):
             assert client.get(f"/api/v1/me/{path}").status_code == 401
             response = client.get(f"/api/v1/me/{path}", headers=authorization)
-            assert response.status_code == 404 and response.json()["detail"] == "Not Found"
+            if path == "balance" and response.status_code == 403:
+                assert response.json()["error"]["code"] == "forbidden"
+            else:
+                assert response.status_code == 404 and response.json()["detail"] == "Not Found"
     print("Kong, TLS, Swagger, JWT and S2 route reservation checks passed.")
     if args.s3:
         print("S3 catalog seed and admin gateway routes passed.")

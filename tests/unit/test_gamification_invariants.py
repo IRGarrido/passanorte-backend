@@ -1,93 +1,37 @@
-"""T039 [US4] Testes unitários dos invariantes de gamificação (FR-027).
-
-`issued→redeemed` exatamente uma vez; `stock_quantity ≥ 0` sob concessão;
-conclusão idempotente (badge + código únicos).
-Deve falhar antes de T045/T046.
-"""
-
-from __future__ import annotations
+from datetime import UTC, datetime
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.pool import StaticPool
 
-from services.gamification.app.core import completion as completion_mod  # noqa: E402
-from services.gamification.app.core import redemptions as redemptions_mod  # noqa: E402
-from services.gamification.app.models.enrollment import Badge, RedeemCode  # noqa: E402
-from services.gamification.app.models.route import Prize  # noqa: E402
-from shared.db import make_session_factory  # noqa: E402
-from shared.errors import ApiError  # noqa: E402
-from tests.conftest import create_test_tables
+from services.benefits.app.api.rewards import apply_rewards
+from services.gamification.app.core.rewards import complete_if_ready
+from services.gamification.app.models.enrollment import RouteCompletion, RouteEnrollment
+from shared.errors import ApiError
+from shared.internal_client import RouteSnapshot
+from shared.rewards import RewardCredit, RewardOperation, sign_rewards
 
 
-@pytest.fixture
-def session_factory():
-    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool)
-    engine = create_test_tables(engine)
-    factory = make_session_factory(engine)
-    try:
-        yield factory
-    finally:
-        engine.dispose()
+def test_rewards_are_idempotent_and_reject_payload_changes(db_session):
+    operation = RewardOperation(user_id="tourist", credits=[
+        RewardCredit(source_type="visit", source_id="v", amount=1, occurred_at=datetime.now(UTC)),
+    ])
+    signed = sign_rewards(operation)
+    for _ in range(2):
+        receipt = apply_rewards(db_session, signed.model_dump(mode="json"))
+        db_session.commit()
+        assert receipt.confirmed and receipt.balance == 1
+    operation.credits[0].amount = 9
+    with pytest.raises(ApiError, match="Produtor"):
+        apply_rewards(db_session, signed.model_dump(mode="json"))
+    with pytest.raises(ApiError) as error:
+        apply_rewards(db_session, sign_rewards(operation).model_dump(mode="json"))
+    assert error.value.status_code == 409
+    db_session.rollback()
 
 
-def test_redeem_code_exactly_once(session_factory):
-    db = session_factory()
-    prize = Prize(name="Camisa", description="d", stock_quantity=5)
-    db.add(prize)
-    db.flush()
-    code = RedeemCode(code="CODIGO-1", user_id="u1", route_id="r1", prize_id=prize.id)
-    db.add(code)
-    db.commit()
-
-    result = redemptions_mod.redeem(db, "CODIGO-1", actor_id="emp-1")
-    assert result["status"] == "redeemed"
-    assert db.query(RedeemCode).filter(RedeemCode.code == "CODIGO-1").first().status.value == "redeemed"
-    assert prize.stock_quantity == 4
-
-    # segunda concessão do mesmo código → 409 (FR-027)
-    with pytest.raises(ApiError) as exc:
-        redemptions_mod.redeem(db, "CODIGO-1", actor_id="emp-1")
-    assert exc.value.status_code == 409
-
-
-def test_redeem_unknown_code_is_404(session_factory):
-    db = session_factory()
-    with pytest.raises(ApiError) as exc:
-        redemptions_mod.redeem(db, "NAO-EXISTE", actor_id="emp-1")
-    assert exc.value.status_code == 404
-
-
-def test_redeem_with_empty_stock_is_409_and_stock_stays_zero(session_factory):
-    db = session_factory()
-    prize = Prize(name="Caneca", description="d", stock_quantity=0)
-    db.add(prize)
-    db.flush()
-    db.add(RedeemCode(code="CODIGO-2", user_id="u1", route_id="r1", prize_id=prize.id))
-    db.commit()
-
-    with pytest.raises(ApiError) as exc:
-        redemptions_mod.redeem(db, "CODIGO-2", actor_id="emp-1")
-    assert exc.value.status_code == 409
-    db.expire_all()
-    assert db.query(Prize).first().stock_quantity == 0  # nunca negativo (FR-027)
-
-
-def test_completion_emits_badge_and_code_idempotently(session_factory):
-    db = session_factory()
-    prize = Prize(name="Chaveiro", description="d", stock_quantity=1)
-    db.add(prize)
-    db.flush()
-    code = completion_mod.complete_route(db, user_id="u1", route_id="r1", prize_id=prize.id)
-
-    second = completion_mod.complete_route(db, user_id="u1", route_id="r1", prize_id=prize.id)
-    assert second["code"] == code["code"]  # mesmo código, sem duplicar (RF36)
-    assert db.query(Badge).filter(Badge.user_id == "u1", Badge.route_id == "r1").count() == 1
-    assert db.query(RedeemCode).filter(RedeemCode.user_id == "u1", RedeemCode.route_id == "r1").count() == 1
-
-
-def test_prize_stock_constraint_rejects_negative(session_factory):
-    db = session_factory()
-    db.add(Prize(name="X", description="d", stock_quantity=-1))
-    with pytest.raises(Exception):  # noqa: B017 — constraint do banco (FR-027)
-        db.commit()
+def test_zero_valid_points_never_complete_a_route(db_session):
+    enrollment = RouteEnrollment(user_id="u", route_id="r")
+    db_session.add(enrollment)
+    db_session.flush()
+    route = RouteSnapshot(id="r", name="Rota", is_active=True, reward_amount=4, points=[])
+    assert complete_if_ready(db_session, enrollment, route, set()) is None
+    assert db_session.query(RouteCompletion).count() == 0

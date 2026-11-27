@@ -74,6 +74,16 @@ def main() -> None:
                 "INSERT INTO audit_logs (id, actor_id, action, entity, entity_id, occurred_at) "
                 "VALUES ('audit-s2', 'employee-s2', 'redeem', 'prize', 'prize-s2', '2026-01-02T03:04:05')"
             )
+            gamification.execute(
+                "INSERT INTO route_enrollments (id, user_id, route_id, status, started_at, completed_at) "
+                "VALUES ('enrollment-s2', 'employee-s2', 'route-s2', 'completed', '2026-01-01', '2026-01-02')"
+            )
+        with psycopg.connect((files / "validation.dsn").read_text()) as validation:
+            validation.execute(
+                "INSERT INTO visits (id, user_id, tourist_spot_id, user_latitude, user_longitude, "
+                "distance_m, status, occurred_at) VALUES "
+                "('visit-s2', 'employee-s2', 'spot-s2', -3.1, -60, 0, 'validated', '2026-01-02')"
+            )
         command = [
             sys.executable, "/app/scripts/migrate_legacy.py",
             "--source-dir", str(files), "--target-dsn-file", str(files / "target.dsn"),

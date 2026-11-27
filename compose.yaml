@@ -10,6 +10,7 @@ x-environment: &environment
   AUTH_SERVICE_URL: http://auth:8001
   BENEFITS_SERVICE_URL: http://benefits:8008
   GAMIFICATION_SERVICE_URL: http://gamification:8004
+  CHECKIN_RADIUS_M: ${CHECKIN_RADIUS_M:-100}
   EDGE_PUBLIC_URL: ${EDGE_PUBLIC_URL:-https://localhost:8443}
   DEPLOYMENT_CITY: ${DEPLOYMENT_CITY:-Manaus}
   DEPLOYMENT_TIMEZONE: ${DEPLOYMENT_TIMEZONE:-America/Manaus}
@@ -169,7 +170,10 @@ services:
       <<: *environment
       INTERNAL_API_TOKEN_FILE: /run/secrets/internal_api_token
       DATABASE_URL_FILE: /run/secrets/database_gamification
-    secrets: [database_gamification, rabbit_url, internal_api_token]
+      REWARDS_SIGNING_KEY_FILE: /run/secrets/rewards_signing_key
+      CHECKIN_TOLERANCE_M: ${CHECKIN_TOLERANCE_M:-0}
+      VISIT_REWARD_AMOUNT: ${VISIT_REWARD_AMOUNT:-1}
+    secrets: [database_gamification, rabbit_url, internal_api_token, rewards_signing_key]
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8004/ready')"]
       interval: 10s
@@ -229,8 +233,9 @@ services:
     environment:
       <<: *environment
       DATABASE_URL_FILE: /run/secrets/database_benefits
+      REWARDS_SIGNING_KEY_FILE: /run/secrets/rewards_signing_key
       INTERNAL_API_TOKEN_FILE: /run/secrets/internal_api_token
-    secrets: [database_benefits, rabbit_url, internal_api_token]
+    secrets: [database_benefits, rabbit_url, internal_api_token, rewards_signing_key]
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8008/ready')"]
       interval: 10s
@@ -298,6 +303,8 @@ secrets:
     file: ${SECRETS_DIR:-./secrets}/pii.key
   pii_hmac:
     file: ${SECRETS_DIR:-./secrets}/pii-hmac.key
+  rewards_signing_key:
+    file: ${SECRETS_DIR:-./secrets}/rewards-signing-key
   internal_api_token:
     file: ${SECRETS_DIR:-./secrets}/internal-api-token
   edge_cert:

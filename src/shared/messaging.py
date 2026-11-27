@@ -292,6 +292,7 @@ async def _supervisor() -> None:
             for consumer, routing_key in (
                 ("insights", "visit.validated"), ("insights", "access.registered"), ("insights", "tourist.login"),
                 ("notifications", "notification.dispatch"), ("chatbot", "catalog.index.refresh"),
+                ("benefits", "rewards.requested"), ("gamification", "catalog.route_changed"),
             ):
                 await _declare_queue(channel, f"passanorte.{consumer}.{routing_key}", routing_key)
             for spec in _state.consumers:

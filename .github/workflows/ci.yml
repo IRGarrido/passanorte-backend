@@ -31,6 +31,8 @@ jobs:
       - run: bash scripts/verify_s2_restore.sh .env.example
         env:
           COMPOSE_PROJECT_NAME: passanorte-ci
-      - run: bash scripts/verify_s2_migration.sh
+      - run: bash scripts/verify_s2_migration.sh --s4
+      - run: docker compose --env-file .env.example -p passanorte-ci up -d --force-recreate --no-deps --wait kong
+      - run: uv run --frozen python scripts/smoke_s4.py --project passanorte-ci --exercise-outage
       - if: always()
         run: docker compose --env-file .env.example -p passanorte-ci down

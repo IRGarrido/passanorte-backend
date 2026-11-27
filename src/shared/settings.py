@@ -39,6 +39,9 @@ class Settings(BaseModel):
     refresh_token_days: int = Field(default=7, ge=1, le=30)
 
     catalog_service_url: HttpUrl = HttpUrl("http://localhost:8002")
+    checkin_radius_m: int = Field(default=100, gt=0)
+    checkin_tolerance_m: int = Field(default=0, ge=0)
+    visit_reward_amount: int = Field(default=1, gt=0, le=2_147_483_647)
     deployment_city: str = Field(default="Manaus", min_length=1)
     deployment_timezone: str = "America/Manaus"
     deployment_language: str = "pt-BR"
@@ -86,6 +89,8 @@ def validate_service(service: str) -> Settings:
     if settings.app_env != "test":
         if service in {"auth", "benefits", "catalog", "gamification"}:
             secret("INTERNAL_API_TOKEN")
+        if service in {"benefits", "gamification"} and len(secret("REWARDS_SIGNING_KEY").encode()) < 32:
+            raise ConfigurationError("REWARDS_SIGNING_KEY must have at least 32 bytes")
         if service == "gamification" and not os.environ.get("CATALOG_SERVICE_URL"):
             raise ConfigurationError("Missing CATALOG_SERVICE_URL")
     if service == "chatbot" and settings.llm_provider == "gemini":

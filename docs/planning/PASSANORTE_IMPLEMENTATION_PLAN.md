@@ -684,7 +684,7 @@ Estas decisões não impedem planejar o projeto. Devem ser fechadas pelo respons
 
 - **D01**
   - Tema: Raio e tolerância do check-in
-  - Decisão a registrar: RF30 fala em raio mais tolerância; Cadastros trata o raio como limiar. Proposta: documentar raio base e tolerância separadamente, fallback global/override por ponto e limite efetivo explícito. Precisão não deve inflar o limite sem regra antifraude.
+  - Decisão implementada: Somar a tolerância global ao raio do ponto ou ao raio global quando o ponto não tem override. A precisão é registrada e não aumenta o limite efetivo. Os padrões e parâmetros estão documentados no [contrato da S4](../implementation/S4_BACKEND.md).
   - Momento: Antes de S4
 - **D02**
   - Tema: Eventos sem data de fim
@@ -692,7 +692,7 @@ Estas decisões não impedem planejar o projeto. Devem ser fechadas pelo respons
   - Momento: Antes de S3
 - **D03**
   - Tema: Rota sem pontos válidos e alterações
-  - Decisão a registrar: Definir caso de todos os pontos removidos/fechados, alteração de recompensa/pontos e créditos retroativos. Proposta: zero pontos não gera conclusão automática; manter snapshot do valor concedido e nunca repetir crédito.
+  - Decisão implementada: Zero pontos válidos não gera conclusão. Alterações no Catálogo reavaliam inscrições vigentes. A conclusão registra o valor aplicado no momento e a mesma origem não volta a gerar crédito.
   - Momento: Antes de S4
 - **D04**
   - Tema: Desativação de parceiro e cupom já resgatado
