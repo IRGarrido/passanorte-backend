@@ -91,20 +91,19 @@ def test_us6_notification_flow(services, replay, db_session):
 
 
 def test_gamification_completion_notifies_tourist(db_session, replay):
-    from services.gamification.app.core import completion as completion_mod
-    from services.notifications.app.core import deps as notif_deps
+    from services.gamification.app.core.rewards import complete_if_ready
+    from services.gamification.app.models.enrollment import RouteEnrollment
+    from shared.internal_client import RouteSnapshot
 
     notif_app = notif_factory()
     notif_app.dependency_overrides[notif_deps.get_db] = lambda: db_session
     notif = TestClient(notif_app)
-
-    from services.gamification.app.models.route import Prize
-
-    prize = Prize(name="Camisa", description="d", stock_quantity=1)
-    db_session.add(prize)
+    enrollment = RouteEnrollment(user_id="user-1", route_id="r-1")
+    db_session.add(enrollment)
     db_session.flush()
-
-    completion_mod.complete_route(db_session, user_id="user-1", route_id="r-1", prize_id=prize.id)
+    route = RouteSnapshot(id="r-1", name="Rota", is_active=True, reward_amount=4, points=["a", "b"])
+    complete_if_ready(db_session, enrollment, route, {"a", "b"})
+    db_session.commit()
 
     replay("notifications", db_session)
 
@@ -114,4 +113,5 @@ def test_gamification_completion_notifies_tourist(db_session, replay):
     ).json()["items"]
     assert len(inbox) == 1
     assert inbox[0]["kind"] == "new_route"
-    assert "redeem_code" in inbox[0]["payload"]
+    assert "r-1" in inbox[0]["payload"]
+    assert "redeem_code" not in inbox[0]["payload"]

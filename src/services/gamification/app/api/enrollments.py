@@ -1,150 +1,137 @@
-"""Inscrição e progresso derivado de rotas (RF29/RF30, D-13) — T044."""
+"""Enrollment commands and read-only progress views."""
 
-from __future__ import annotations
-
-import logging
 from collections.abc import Callable
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from services.gamification.app.core.completion import complete_route
-from services.gamification.app.core.deps import (
-    get_auth_header,
-    get_db,
-    get_route_lookup,
-    get_validated_visits,
-    require_role,
+from services.gamification.app.core.deps import get_db, get_route_lookup, require_role
+from services.gamification.app.core.rewards import (
+    complete_if_ready,
+    get_reward_gateway,
+    lock,
+    operation_result,
+    record_intent,
+    visited_points,
 )
-from services.gamification.app.models.enrollment import (
-    Badge,
-    EnrollmentStatus,
-    RedeemCode,
-    RouteEnrollment,
-)
+from services.gamification.app.models.enrollment import CreditIntent, EnrollmentStatus, RouteEnrollment
 from shared.errors import ApiError
 from shared.internal_client import RouteSnapshot
-from shared.logging import log_event
+from shared.rewards import RewardReceipt, SignedRewards
 
 router = APIRouter(tags=["enrollments"])
-
-logger = logging.getLogger("gamification")
-
-
-def _derive_progress(route: RouteSnapshot, visited: set[str]) -> dict:
-    active_points = route.points
-    visited_points = [spot for spot in active_points if spot in visited]
-    pending = [spot for spot in active_points if spot not in visited]
-    percent = round(100.0 * len(visited_points) / len(active_points), 2) if active_points else 0.0
-    return {"visited": visited_points, "pending": pending, "percent": percent}
+require_tourist = require_role("tourist")
+Lookup = Callable[[str], RouteSnapshot | None]
+Gateway = Callable[[SignedRewards, bool], RewardReceipt]
 
 
+def _enrollment(db: Session, user_id: str, route_id: str) -> RouteEnrollment | None:
+    return db.scalar(select(RouteEnrollment).where(
+        RouteEnrollment.user_id == user_id, RouteEnrollment.route_id == route_id,
+    ))
 
-def _check_completion(db: Session, enrollment: RouteEnrollment, route: RouteSnapshot, body: dict) -> dict:
-    """Conclusão derivada: percent 100% emite insígnia + código idempotentes (RF35/RF36)."""
-    if body["percent"] == 100.0 and enrollment.status == EnrollmentStatus.in_progress:
-        result = complete_route(db, user_id=enrollment.user_id, route_id=route.id, prize_id=route.prize_id)
-        enrollment.status = EnrollmentStatus.completed
-        enrollment.completed_at = __import__("datetime").datetime.now(__import__("datetime").UTC)
-        db.commit()
-        body["status"] = "completed"
-        body["redeem_code"] = result["code"]
-        body["badge_awarded"] = True
-    return body
 
-def _enrollment_body(db: Session, enrollment: RouteEnrollment, validated: set[str], route: RouteSnapshot) -> dict:
-    progress = _derive_progress(route, validated)
-    badge = db.query(Badge).filter(Badge.user_id == enrollment.user_id, Badge.route_id == route.id).first()
-    code = (
-        db.query(RedeemCode).filter(RedeemCode.user_id == enrollment.user_id, RedeemCode.route_id == route.id).first()
-    )
+def _body(enrollment: RouteEnrollment, route: RouteSnapshot, visited: set[str]) -> dict:
+    done = [point for point in route.points if point in visited]
+    pending = [point for point in route.points if point not in visited]
     return {
-        "id": enrollment.id,
-        "route_id": route.id,
-        "route_name": route.name,
-        "status": _status_value(enrollment.status),
-        **progress,
-        "badge_awarded": badge is not None,
-        "redeem_code": code.code if code else None,
+        "id": enrollment.id, "route_id": route.id, "route_name": route.name, "status": enrollment.status,
+        "visited": done, "pending": pending,
+        "percent": round(100 * len(done) / len(route.points), 2) if route.points else 0.0,
     }
-
-
-def _status_value(status_: object) -> str:
-    return status_.value if isinstance(status_, EnrollmentStatus) else str(status_)
 
 
 @router.post("/routes/{route_id}/enrollments", status_code=201)
 def enroll(
-    route_id: str,
-    claims: dict = Depends(require_role("tourist")),
-    auth_header: str = Depends(get_auth_header),
-    validated_for: Callable = Depends(get_validated_visits),
-    lookup: Callable = Depends(get_route_lookup),
-    db: Session = Depends(get_db),
+    route_id: str, claims: dict = Depends(require_tourist), lookup: Lookup = Depends(get_route_lookup),
+    db: Session = Depends(get_db), gateway: Gateway = Depends(get_reward_gateway),
 ) -> dict:
+    user_id = claims["sub"]
+    lock(db, "route", route_id)
+    lock(db, "tourist", user_id)
     route = lookup(route_id)
-    if route is None or not route.is_active:
-        raise ApiError(code="not_found", message="Rota não encontrada.", status_code=404)
-    existing = (
-        db.query(RouteEnrollment).filter(RouteEnrollment.user_id == claims["sub"], RouteEnrollment.route_id == route_id)
-        .first()
-    )
-    if existing is not None:
-        raise ApiError(code="already_enrolled", message="Você já está inscrito nesta rota.", status_code=409)
-
-    enrollment = RouteEnrollment(user_id=claims["sub"], route_id=route_id)
-    db.add(enrollment)
-    db.flush()
+    if route is None or route.is_removed or not route.is_active:
+        raise ApiError("not_found", "Rota indisponivel para inscricao.", 404)
+    enrollment = _enrollment(db, user_id, route_id)
+    if enrollment is None:
+        enrollment = RouteEnrollment(user_id=user_id, route_id=route_id)
+        db.add(enrollment)
+        db.flush()
+    elif enrollment.status == EnrollmentStatus.withdrawn:
+        enrollment.status = EnrollmentStatus.in_progress
+        enrollment.started_at = datetime.now(UTC)
+        enrollment.completed_at = None
+    else:
+        raise ApiError("already_enrolled", "Voce ja esta inscrito nesta rota.", 409)
+    visited = visited_points(db, user_id)
+    credit = complete_if_ready(db, enrollment, route, visited)
+    intent = record_intent(db, user_id, [credit]) if credit else None
+    body = _body(enrollment, route, visited)
     db.commit()
-    log_event(logger, "route_enrolled", user_id=claims["sub"], route_id=route_id)
+    return {**body, **operation_result(intent, gateway, submit=True)}
 
-    # progresso é DERIVADO (D-13): visitas anteriores à inscrição contam
-    validated = set(validated_for(auth_header))
-    body = _enrollment_body(db, enrollment, validated, route)
 
-    # conclusão imediata (retroativa, D-13)
-    return _check_completion(db, enrollment, route, body)
+@router.delete("/routes/{route_id}/enrollments", status_code=204)
+@router.delete("/enrollments/{route_id}", status_code=204)
+def withdraw(route_id: str, claims: dict = Depends(require_tourist), db: Session = Depends(get_db)) -> None:
+    lock(db, "tourist", claims["sub"])
+    enrollment = _enrollment(db, claims["sub"], route_id)
+    if enrollment is None:
+        raise ApiError("not_found", "Inscricao nao encontrada.", 404)
+    enrollment.status = EnrollmentStatus.withdrawn
+    db.commit()
 
 
 @router.get("/enrollments")
 def list_enrollments(
-    claims: dict = Depends(require_role("tourist")),
-    auth_header: str = Depends(get_auth_header),
-    validated_for: Callable = Depends(get_validated_visits),
-    lookup: Callable = Depends(get_route_lookup),
+    claims: dict = Depends(require_tourist), lookup: Lookup = Depends(get_route_lookup),
     db: Session = Depends(get_db),
 ) -> dict:
-    enrollments = db.query(RouteEnrollment).filter(RouteEnrollment.user_id == claims["sub"]).all()
-    validated = set(validated_for(auth_header))
+    user_id = claims["sub"]
+    enrollments = db.scalars(select(RouteEnrollment).where(
+        RouteEnrollment.user_id == user_id, RouteEnrollment.status != EnrollmentStatus.withdrawn,
+    ).order_by(RouteEnrollment.started_at, RouteEnrollment.id))
+    visited = visited_points(db, user_id)
     items = []
     for enrollment in enrollments:
-        route = require_enrolled_route(lookup, enrollment.route_id)
-        items.append(_check_completion(db, enrollment, route, _enrollment_body(db, enrollment, validated, route)))
+        route = lookup(enrollment.route_id)
+        if route is not None and not route.is_removed:
+            items.append(_body(enrollment, route, visited))
     return {"items": items, "total": len(items)}
 
 
 @router.get("/enrollments/{route_id}")
 def get_enrollment(
-    route_id: str,
-    claims: dict = Depends(require_role("tourist")),
-    auth_header: str = Depends(get_auth_header),
-    validated_for: Callable = Depends(get_validated_visits),
-    lookup: Callable = Depends(get_route_lookup),
+    route_id: str, claims: dict = Depends(require_tourist), lookup: Lookup = Depends(get_route_lookup),
     db: Session = Depends(get_db),
 ) -> dict:
-    enrollment = (
-        db.query(RouteEnrollment).filter(RouteEnrollment.user_id == claims["sub"], RouteEnrollment.route_id == route_id)
-        .first()
-    )
-    if enrollment is None:
-        raise ApiError(code="not_found", message="Inscrição não encontrada.", status_code=404)
-    validated = set(validated_for(auth_header))
-    route = require_enrolled_route(lookup, route_id)
-    return _check_completion(db, enrollment, route, _enrollment_body(db, enrollment, validated, route))
+    enrollment = _enrollment(db, claims["sub"], route_id)
+    route = lookup(route_id) if enrollment and enrollment.status != EnrollmentStatus.withdrawn else None
+    if enrollment is None or route is None or route.is_removed:
+        raise ApiError("not_found", "Inscricao nao encontrada.", 404)
+    return _body(enrollment, route, visited_points(db, claims["sub"]))
 
 
-def require_enrolled_route(lookup: Callable, route_id: str) -> RouteSnapshot:
-    route: RouteSnapshot | None = lookup(route_id)
-    if route is None:
-        raise ApiError(code="route_unavailable", message="Definição de rota indisponível.", status_code=503)
-    return route
+def _intent(db: Session, operation_id: str, user_id: str) -> CreditIntent:
+    intent = db.get(CreditIntent, operation_id)
+    if intent is None or intent.user_id != user_id:
+        raise ApiError("not_found", "Operacao nao encontrada.", 404)
+    return intent
+
+
+@router.get("/reward-operations/{operation_id}")
+def get_operation(
+    operation_id: str, claims: dict = Depends(require_tourist), db: Session = Depends(get_db),
+    gateway: Gateway = Depends(get_reward_gateway),
+) -> dict:
+    return operation_result(_intent(db, operation_id, claims["sub"]), gateway, submit=False)
+
+
+@router.post("/reward-operations/{operation_id}/retry")
+def retry_operation(
+    operation_id: str, claims: dict = Depends(require_tourist), db: Session = Depends(get_db),
+    gateway: Gateway = Depends(get_reward_gateway),
+) -> dict:
+    return operation_result(_intent(db, operation_id, claims["sub"]), gateway, submit=True)

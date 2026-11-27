@@ -28,6 +28,7 @@ from services.catalog.app.schemas.catalog_schemas import (
 )
 from shared.errors import ApiError
 from shared.insights_client import notify_access
+from shared.settings import Settings
 
 router = APIRouter(tags=["tourist-spots"])
 development_router = APIRouter(tags=["internal"])
@@ -155,7 +156,7 @@ def spot_detail(db: Session, spot: TouristSpot, *, public: bool = True) -> Touri
         events = events.filter(upcoming())
     return TouristSpotDetail(
         **_public_fields(spot),
-        tolerance_radius_m=spot.tolerance_radius_m,
+        tolerance_radius_m=spot.tolerance_radius_m or Settings.load().checkin_radius_m,
         categories=_categories_for(db, spot.id),
         schedule=schedule,
         events=[event_body(event) for event in events.order_by(Event.occurs_at)],
@@ -184,7 +185,7 @@ def internal_create_spot(payload: dict, db: Session = Depends(get_db)) -> dict:
         latitude=payload["latitude"],
         longitude=payload["longitude"],
         status=SpotStatus(payload.get("status", "open")),
-        tolerance_radius_m=payload.get("tolerance_radius_m", 100),
+        tolerance_radius_m=payload.get("tolerance_radius_m"),
     )
     db.add(spot)
     db.flush()

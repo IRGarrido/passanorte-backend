@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, status
 from pydantic import BaseModel, Field, HttpUrl, model_validator
 from sqlalchemy.orm import Session
 
+from services.catalog.app.api.routes import route_changed
 from services.catalog.app.api.spots import _spot_query, spot_detail
 from services.catalog.app.core.deps import get_db, require_role
 from services.catalog.app.models.audit import AuditLog
@@ -63,7 +64,11 @@ def _index_spot(db: Session, spot: TouristSpot, *, operation: str = "upsert") ->
 
 
 def _hide_spot_from_routes(db: Session, spot_id: str) -> None:
-    db.query(RoutePoint).filter(RoutePoint.tourist_spot_id == spot_id).update({"is_active": False})
+    points = db.query(RoutePoint).filter(RoutePoint.tourist_spot_id == spot_id, RoutePoint.is_active.is_(True))
+    route_ids = {point.route_id for point in points}
+    points.update({"is_active": False})
+    for route_id in sorted(route_ids):
+        route_changed(db, route_id)
 
 
 class TouristSpotCreate(BaseModel):
@@ -75,7 +80,7 @@ class TouristSpotCreate(BaseModel):
     image_url: HttpUrl | None = None
     duration_minutes: int | None = Field(default=None, gt=0)
     category_ids: list[str] = Field(min_length=1, max_length=100)
-    tolerance_radius_m: int = Field(default=100, ge=1)
+    tolerance_radius_m: int | None = Field(default=None, ge=1)
 
 
 class TouristSpotUpdate(BaseModel):
@@ -182,11 +187,11 @@ def update_spot(
     spot = _spot_query(db).filter(TouristSpot.id == spot_id).first()
     if spot is None:
         raise ApiError(code="not_found", message="Ponto turístico não encontrado.", status_code=404)
-    for field in ("name", "description", "latitude", "longitude", "tolerance_radius_m", "address"):
+    for field in ("name", "description", "latitude", "longitude", "address"):
         value = getattr(payload, field, None)
         if value is not None:
             setattr(spot, field, value)
-    for field in ("image_url", "duration_minutes"):
+    for field in ("image_url", "duration_minutes", "tolerance_radius_m"):
         if field in payload.model_fields_set:
             value = getattr(payload, field)
             setattr(spot, field, str(value) if field == "image_url" and value else value)
@@ -205,7 +210,7 @@ def update_spot(
 @router.delete("/tourist-spots/{spot_id}", status_code=204)
 def remove_spot(spot_id: str, claims: dict = Depends(require_admin), db: Session = Depends(get_db)) -> None:
     """Remoção lógica (RF12): rotas ativas não quebram (edge case da spec)."""
-    spot = _spot_query(db).filter(TouristSpot.id == spot_id).first()
+    spot = _spot_query(db).filter(TouristSpot.id == spot_id).with_for_update().first()
     if spot is None:
         raise ApiError(code="not_found", message="Ponto turístico não encontrado.", status_code=404)
     spot.is_removed = True
@@ -257,7 +262,7 @@ def set_status(
     claims: dict = Depends(require_admin),
     db: Session = Depends(get_db),
 ) -> dict:
-    spot = _spot_query(db).filter(TouristSpot.id == spot_id).first()
+    spot = _spot_query(db).filter(TouristSpot.id == spot_id).with_for_update().first()
     if spot is None:
         raise ApiError(code="not_found", message="Ponto turístico não encontrado.", status_code=404)
     if spot.status == SpotStatus.permanently_closed:

@@ -13,7 +13,8 @@ class RouteSnapshot(BaseModel):
     id: str
     name: str
     is_active: bool
-    prize_id: str
+    is_removed: bool = False
+    reward_amount: int
     points: list[str]
 
 

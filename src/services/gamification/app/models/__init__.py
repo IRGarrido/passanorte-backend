@@ -3,8 +3,10 @@ from services.gamification.app.models.audit import AuditLog  # noqa: F401
 from services.gamification.app.models.enrollment import (  # noqa: F401
     Badge,
     CodeStatus,
+    CreditIntent,
     EnrollmentStatus,
     RedeemCode,
+    RouteCompletion,
     RouteEnrollment,
 )
 from services.gamification.app.models.route import Prize  # noqa: F401

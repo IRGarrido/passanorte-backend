@@ -1,110 +1,121 @@
-"""T047 [US4] Integração: ciclo completo de gamificação (quickstart S4).
-
-Inscrição → visitas validadas (validation) → progresso derivado (D-13) →
-conclusão com insígnia + código → resgate transacional pelo funcionário.
-"""
-
-from __future__ import annotations
-
-import pytest
 from fastapi.testclient import TestClient
 
-from services.gamification.app.core import deps as gam_deps  # noqa: E402
-from services.gamification.app.main import create_test_app as gam_factory  # noqa: E402
-from services.validation.app.core import deps as val_deps  # noqa: E402
-from services.validation.app.main import create_test_app as val_factory  # noqa: E402
-from shared.security import create_access_token, decode_token  # noqa: E402
-
-SPOTS = ["spot-1", "spot-2"]
-
-
-@pytest.fixture
-def services(db_session, connect_route_services):
-    """validation e gamification compartilham o mesmo banco em memória."""
-    val_app = val_factory()
-    val_app.dependency_overrides[val_deps.get_db] = lambda: db_session
-    val_app.dependency_overrides[val_deps.get_catalog_snapshot] = lambda: (
-        lambda spot_id: {"id": spot_id, "name": "X", "latitude": -3.4704, "longitude": -60.0238,
-                         "tolerance_radius_m": 100, "status": "open", "category_ids": []}
-    )
-    gam_app = gam_factory()
-    gam_app.dependency_overrides[gam_deps.get_db] = lambda: db_session
-
-    def fetch_validated(auth_header: str) -> list[str]:
-        # simula a chamada REST ao validation lendo o banco compartilhado (D-13)
-        from services.validation.app.models.visit import Visit
-
-        claims = decode_token(auth_header.removeprefix("Bearer "), expected_type="access")
-        rows = db_session.query(Visit).filter(Visit.user_id == claims["sub"], Visit.status == "validated").all()
-        return [row.tourist_spot_id for row in rows]
-
-    gam_app.dependency_overrides[gam_deps.get_validated_visits] = lambda: fetch_validated
-    catalog, gamification = connect_route_services(gam_app)
-    return catalog, TestClient(val_app), gamification
+from services.benefits.app.api.partners import get_db as get_benefits_db
+from services.benefits.app.main import app as benefits_app
+from services.catalog.app.models.spot import Category, TouristSpot
+from services.gamification.app.core import rewards
+from services.gamification.app.core.deps import get_db, get_route_lookup
+from services.gamification.app.main import create_test_app
+from services.gamification.app.models.enrollment import RouteCompletion
+from services.validation.app.core.deps import get_catalog_snapshot
+from services.validation.app.core.deps import get_db as get_visits_db
+from shared.errors import ApiError
+from shared.security import create_access_token
 
 
-def _headers(role: str, user_id: str) -> dict:
-    token, _ = create_access_token(user_id, role)
+def headers(role, user):
+    token, _ = create_access_token(user, role)
     return {"Authorization": f"Bearer {token}"}
 
 
-def test_us4_full_gamification_cycle(services):
-    catalog, validation, gamification = services
-    admin = _headers("admin", "admin-1")
-    tourist = _headers("tourist", "user-7")
-    supplier = _headers("supplier", "emp-2")
+def test_checkin_reconciles_two_routes_and_never_repeats_credit(
+    db_session, connect_route_services, monkeypatch, events,
+):
+    db_session.add_all([
+        Category(id="theme", name="Cultura"),
+        *(TouristSpot(id=key, name=key, description=key, latitude=0, longitude=0) for key in ("a", "b", "c", "d")),
+    ])
+    db_session.commit()
+    app = create_test_app()
+    app.dependency_overrides[get_db] = lambda: db_session
+    app.dependency_overrides[get_visits_db] = lambda: db_session
+    app.dependency_overrides[get_catalog_snapshot] = lambda: lambda _: {
+        "latitude": 0, "longitude": 0, "status": "open", "tolerance_radius_m": 100,
+    }
+    catalog, game = connect_route_services(app)
+    benefits_app.dependency_overrides[get_benefits_db] = lambda: db_session
+    benefits = TestClient(benefits_app)
+    admin, tourist = headers("admin", "admin"), headers("tourist", "tourist")
 
-    # 1. admin cadastra rota com brinde e estoque (RF18)
-    resp = catalog.post(
-        "/api/v1/routes",
-        headers=admin,
-        json={"name": "Rota Histórica", "description": "d", "points": SPOTS,
-              "prize": {"name": "Camisa", "description": "camisa"}},
-    )
-    assert resp.status_code == 201, resp.text
-    route_id = resp.json()["id"]
-    prize_id = resp.json()["prize"]["id"]
-    resp = gamification.patch(f"/api/v1/prizes/{prize_id}/stock", headers=admin, json={"stock_quantity": 1})
-    assert resp.status_code == 200
+    def visit(point):
+        return game.post("/api/v1/visits", headers=tourist, json={
+            "tourist_spot_id": point, "latitude": 0, "longitude": 0, "accuracy_m": 4,
+        })
 
-    # 2. turista se inscreve sem visitas → 0% (RF29)
-    resp = gamification.post(f"/api/v1/routes/{route_id}/enrollments", headers=tourist)
-    assert resp.status_code == 201, resp.text
-    assert resp.json()["percent"] == 0.0
-    assert resp.json()["status"] == "in_progress"
+    def route(name, points, amount):
+        response = catalog.post("/api/v1/routes", headers=admin, json={
+            "name": name, "points": points, "category_ids": ["theme"], "reward_amount": amount,
+        })
+        assert response.status_code == 201, response.text
+        return response.json()["id"]
 
-    # 3. primeira visitação validada → 50% (RF30)
-    resp = validation.post(
-        "/api/v1/visits", headers=tourist,
-        json={"tourist_spot_id": "spot-1", "latitude": -3.4704, "longitude": -60.0238},
-    )
-    assert resp.status_code == 201, resp.text
-    resp = gamification.get(f"/api/v1/enrollments/{route_id}", headers=tourist)
-    assert resp.json()["percent"] == 50.0
-    assert resp.json()["pending"] == ["spot-2"]
+    def balance():
+        return benefits.get("/api/v1/me/balance", headers=tourist).json()["balance"]
 
-    # 4. segunda visitação → 100% na próxima consulta → conclusão automática
-    resp = validation.post(
-        "/api/v1/visits", headers=tourist,
-        json={"tourist_spot_id": "spot-2", "latitude": -3.4704, "longitude": -60.0238},
-    )
-    assert resp.status_code == 201
-    resp = gamification.get(f"/api/v1/enrollments/{route_id}", headers=tourist)
-    body = resp.json()
-    assert body["percent"] == 100.0
-    assert body["status"] == "completed"
-    redeem_code = body["redeem_code"]
-    assert redeem_code
+    try:
+        assert visit("a").json()["balance"] == 1
+        assert visit("c").json()["balance"] == 2
+        routes = [route("A", ["a", "b"], 3), route("C", ["c", "b"], 5)]
+        for route_id in routes:
+            response = game.post(f"/api/v1/routes/{route_id}/enrollments", headers=tourist)
+            assert response.status_code == 201 and response.json()["percent"] == 50
+        result = visit("b")
+        assert result.status_code == 201, result.text
+        assert result.json()["balance"] == 11
+        assert len(db_session.query(RouteCompletion).all()) == 2
+        assert visit("b").json()["already_visited"] is True
+        for route_id in routes:
+            assert game.get(f"/api/v1/enrollments/{route_id}", headers=tourist).json()["status"] == "completed"
+            assert game.delete(f"/api/v1/enrollments/{route_id}", headers=tourist).status_code == 204
+            again = game.post(f"/api/v1/routes/{route_id}/enrollments", headers=tourist)
+            assert again.json()["status"] == "completed"
+        assert balance() == 11
+        assert catalog.delete(f"/api/v1/routes/{routes[0]}", headers=admin).status_code == 204
+        lookup = app.dependency_overrides[get_route_lookup]
+        monkeypatch.setattr(rewards, "get_route_lookup", lookup)
+        rewards.reconcile_route(db_session, {"route_id": routes[0]})
+        db_session.commit()
+        assert game.get(f"/api/v1/enrollments/{routes[0]}", headers=tourist).status_code == 404
+        assert balance() == 11
 
-    # insígnia e código visíveis ao turista (RF35/RF36)
-    assert len(gamification.get("/api/v1/badges", headers=tourist).json()["items"]) == 1
-    assert len(gamification.get("/api/v1/redeem-codes", headers=tourist).json()["items"]) == 1
+        changed = route("Mudança", ["a", "c", "d"], 7)
+        game.post(f"/api/v1/routes/{changed}/enrollments", headers=tourist).raise_for_status()
+        catalog.patch("/api/v1/tourist-spots/d/status", headers=admin,
+                      json={"status": "permanently_closed"}).raise_for_status()
+        progress = game.get(f"/api/v1/enrollments/{changed}", headers=tourist).json()
+        assert progress["percent"] == 100 and progress["status"] == "in_progress"
+        from services.benefits.app.api.rewards import apply_rewards
 
-    # 5. funcionário resgata o código → estoque baixa para 0 (RF21)
-    resp = gamification.post("/api/v1/redemptions", headers=supplier, json={"code": redeem_code})
-    assert resp.status_code == 200, resp.text
-    assert resp.json()["status"] == "redeemed"
+        for _ in range(2):
+            rewards.reconcile_route(db_session, {"route_id": changed})
+            db_session.commit()
+        pending_commands = [event["data"] for event in events if event["type"] == "rewards.requested"
+                            and event["data"]["rewards"]["credits"][0]["amount"] == 7]
+        assert len(pending_commands) == 1
+        apply_rewards(db_session, pending_commands[0])
+        db_session.commit()
+        assert balance() == 18
 
-    # reuso do mesmo código → 409 (FR-027)
-    resp = gamification.post("/api/v1/redemptions", headers=supplier, json={"code": redeem_code})
-    assert resp.status_code == 409
+        # A confirmed visit outlives loss of the synchronous Benefits connection.
+        gateway = app.dependency_overrides[rewards.get_reward_gateway]
+        app.dependency_overrides[rewards.get_reward_gateway] = lambda: lambda *_: unavailable()
+        other = headers("tourist", "other")
+        pending = game.post("/api/v1/visits", headers=other, json={
+            "tourist_spot_id": "a", "latitude": 0, "longitude": 0, "accuracy_m": 4,
+        })
+        assert pending.status_code == 202 and pending.json()["reward_status"] == "pending"
+        operation = pending.json()["operation_id"]
+        assert game.get(f"/api/v1/reward-operations/{operation}", headers=tourist).status_code == 404
+        app.dependency_overrides[rewards.get_reward_gateway] = gateway
+        command = next(event["data"] for event in events if event["type"] == "rewards.requested"
+                       and event["data"]["rewards"]["user_id"] == "other")
+        apply_rewards(db_session, command)
+        db_session.commit()
+        status = game.get(f"/api/v1/reward-operations/{operation}", headers=other).json()
+        assert status["reward_status"] == "confirmed" and status["balance"] == 1
+    finally:
+        benefits_app.dependency_overrides.clear()
+
+
+def unavailable():
+    raise ApiError("dependency_unavailable", "Beneficios indisponivel.", 503)

@@ -3,15 +3,16 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Generator
+from urllib.parse import quote
 
-import httpx
 import jwt
 from fastapi import Request
 from sqlalchemy.orm import Session
 
 from shared.errors import ApiError
+from shared.internal_client import call_internal
 from shared.security import decode_token
-from shared.settings import Settings, secret
+from shared.settings import Settings
 
 
 def get_db() -> Generator[Session, None, None]:
@@ -40,20 +41,11 @@ def get_catalog_snapshot() -> Callable[[str], dict]:
     base_url = str(Settings.load().catalog_service_url).rstrip("/")
 
     def fetch(spot_id: str) -> dict:
-        try:
-            resp = httpx.get(
-                f"{base_url}/api/v1/internal/tourist-spots/{spot_id}",
-                headers={"X-Internal-Token": secret("INTERNAL_API_TOKEN", required=False)}, timeout=5.0,
-            )
-        except httpx.HTTPError:
-            raise ApiError(
-                code="catalog_unavailable",
-                message="Catálogo indisponível no momento.",
-                status_code=503,
-            ) from None
-        if resp.status_code == 404:
+        result: dict | None = call_internal(
+            base_url, "GET", f"/internal/tourist-spots/{quote(spot_id, safe='')}", missing_ok=True,
+        )
+        if result is None:
             raise ApiError(code="not_found", message="Ponto turístico não encontrado.", status_code=404)
-        resp.raise_for_status()
-        return resp.json()
+        return result
 
     return fetch

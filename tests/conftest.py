@@ -53,6 +53,8 @@ os.environ["JWT_PUBLIC_KEYS_DIR"] = str(_key_dir)
 os.environ["JWT_PRIVATE_KEY_FILE"] = str(_private)
 os.environ.pop("INTERNAL_API_TOKEN_FILE", None)
 os.environ["INTERNAL_API_TOKEN"] = secrets.token_urlsafe(48)
+os.environ.pop("REWARDS_SIGNING_KEY_FILE", None)
+os.environ["REWARDS_SIGNING_KEY"] = secrets.token_urlsafe(48)
 os.environ["PII_HMAC_KEY"] = secrets.token_urlsafe(48)
 os.environ["PII_ENCRYPTION_KEY"] = Fernet.generate_key().decode()
 
@@ -187,10 +189,11 @@ def connect_route_services(db_session, internal_headers):
     """Exercise both HTTP contracts without a Docker network."""
     from fastapi.testclient import TestClient
 
-    from services.catalog.app.api.routes import get_prize_service
+    from services.benefits.app.api.rewards import apply_rewards, reward_status
     from services.catalog.app.core.deps import get_db
     from services.catalog.app.main import create_test_app
     from services.gamification.app.core.deps import get_route_lookup
+    from services.gamification.app.core.rewards import get_reward_gateway
     from shared.internal_client import RouteSnapshot
 
     def connect(gamification_app):
@@ -199,17 +202,20 @@ def connect_route_services(db_session, internal_headers):
         catalog = TestClient(catalog_app)
         gamification = TestClient(gamification_app)
 
-        def prizes(method, path, **kwargs):
-            response = gamification.request(method, f"/api/v1{path}", headers=internal_headers, **kwargs)
-            return response.raise_for_status().json()
-
         def lookup(route_id):
             response = catalog.get(f"/api/v1/internal/routes/{route_id}", headers=internal_headers)
             if response.status_code == 404:
                 return None
             return RouteSnapshot.model_validate(response.raise_for_status().json())
 
-        catalog_app.dependency_overrides[get_prize_service] = lambda: prizes
+        def rewards(command, submit):
+            if not submit:
+                return reward_status(command, db_session)
+            receipt = apply_rewards(db_session, command.model_dump())
+            db_session.commit()
+            return receipt
+
+        gamification_app.dependency_overrides[get_reward_gateway] = lambda: rewards
         gamification_app.dependency_overrides[get_route_lookup] = lambda: lookup
         return catalog, gamification
 

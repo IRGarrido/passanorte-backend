@@ -6,12 +6,16 @@ tolerante a falhas (D-05) com catalog simulado.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import pytest
 from fastapi.testclient import TestClient
 
+from services.gamification.app.core.rewards import get_reward_gateway
 from services.validation.app.core import deps as validation_deps  # noqa: E402
 from services.validation.app.core import propagator as propagator_mod  # noqa: E402
 from services.validation.app.main import create_test_app as validation_factory  # noqa: E402
+from shared.rewards import RewardReceipt
 from shared.security import create_access_token  # noqa: E402
 
 SPOT = {
@@ -28,6 +32,9 @@ SPOT = {
 @pytest.fixture
 def app_and_db(db_session):
     app = validation_factory()
+    app.dependency_overrides[get_reward_gateway] = lambda: lambda *_: RewardReceipt(
+        confirmed=True, balance=1, checked_at=datetime.now(UTC),
+    )
     app.dependency_overrides[validation_deps.get_db] = lambda: db_session
     app.dependency_overrides[validation_deps.get_catalog_snapshot] = lambda: (lambda spot_id: dict(SPOT, id=spot_id))
     return app
@@ -49,7 +56,7 @@ def test_us3_visit_flow_inside_and_outside_radius(app_and_db):
     resp = client.post(
         "/api/v1/visits",
         headers=headers,
-        json={"tourist_spot_id": "spot-1", "latitude": -3.4704, "longitude": -60.0100},
+        json={"tourist_spot_id": "spot-1", "accuracy_m": 5, "latitude": -3.4704, "longitude": -60.0100},
     )
     assert resp.status_code == 422
     assert resp.json()["status"] == "rejected"
@@ -59,7 +66,7 @@ def test_us3_visit_flow_inside_and_outside_radius(app_and_db):
     resp = client.post(
         "/api/v1/visits",
         headers=headers,
-        json={"tourist_spot_id": "spot-1", "latitude": -3.4704, "longitude": -60.0238},
+        json={"tourist_spot_id": "spot-1", "accuracy_m": 5, "latitude": -3.4704, "longitude": -60.0238},
     )
     assert resp.status_code == 201, resp.text
     assert resp.json()["status"] == "validated"
@@ -70,7 +77,7 @@ def test_us3_visit_flow_inside_and_outside_radius(app_and_db):
     resp = client.post(
         "/api/v1/visits",
         headers=headers,
-        json={"tourist_spot_id": "spot-1", "latitude": -3.4704, "longitude": -60.0238},
+        json={"tourist_spot_id": "spot-1", "accuracy_m": 5, "latitude": -3.4704, "longitude": -60.0238},
     )
     assert resp.status_code == 200
     assert len(propagated) == 1

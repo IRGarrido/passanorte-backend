@@ -6,7 +6,7 @@ import enum
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import DateTime, ForeignKey, String, UniqueConstraint
+from sqlalchemy import JSON, DateTime, ForeignKey, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from services.gamification.app.db import Base
@@ -15,6 +15,7 @@ from services.gamification.app.db import Base
 class EnrollmentStatus(str, enum.Enum):
     in_progress = "in_progress"
     completed = "completed"
+    withdrawn = "withdrawn"
 
 
 class CodeStatus(str, enum.Enum):
@@ -35,6 +36,25 @@ class RouteEnrollment(Base):
     )
     started_at: Mapped[object] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
     completed_at: Mapped[object] = mapped_column(DateTime, nullable=True)
+
+
+class RouteCompletion(Base):
+    __tablename__ = "route_completions"
+    __table_args__ = (UniqueConstraint("user_id", "route_id", name="uq_route_completion"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id: Mapped[str] = mapped_column(String(36))
+    route_id: Mapped[str] = mapped_column(String(36))
+    reward_amount: Mapped[int] = mapped_column()
+    completed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class CreditIntent(Base):
+    __tablename__ = "credit_intents"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(36), index=True)
+    payload: Mapped[dict] = mapped_column(JSON)
 
 class Badge(Base):
     __tablename__ = "badges"

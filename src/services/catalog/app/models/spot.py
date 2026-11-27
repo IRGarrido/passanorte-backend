@@ -55,7 +55,7 @@ class TouristSpot(Base):
     status: Mapped[SpotStatus] = mapped_column(
         Enum(SpotStatus, name="spot_status"), nullable=False, default=SpotStatus.open
     )
-    tolerance_radius_m: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
+    tolerance_radius_m: Mapped[int | None] = mapped_column(Integer)
     is_removed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     categories: Mapped[list[SpotCategory]] = relationship(back_populates="spot")

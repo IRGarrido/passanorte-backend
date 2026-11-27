@@ -68,13 +68,13 @@ services:
           - "~/api/v1/tourist-spots/[^/]+/?$"
           - "~/api/v1/tourist-spots/[^/]+/external-links/?$"
           - "~/api/v1/categories/?$"
-          - "~/api/v1/routes/?$"
+          - "~/api/v1/routes(?:/[^/]+)?/?$"
           - "~/api/v1/events/?$"
       # autenticado: escrita de todos os prefixos + GET /admin/tourist-spots/*
       - name: catalog-api
         strip_path: false
         paths:
-          - "~/api/v1/(tourist-spots|admin/tourist-spots|admin/events|categories|events)(/.*)?$"
+          - "~/api/v1/(tourist-spots|admin/tourist-spots|admin/events|admin/routes|categories|events)(/.*)?$"
           - "~/api/v1/routes(?:/[^/]+)?/?$"
         plugins:
           - name: jwt
@@ -121,7 +121,7 @@ services:
       - name: gamification-api
         strip_path: false
         paths:
-          - "~/api/v1/(visits|enrollments|redemptions|prizes|badges|redeem-codes)(/.*)?$"
+          - "~/api/v1/(visits|enrollments|reward-operations)(/.*)?$"
           - "~/api/v1/routes/[^/]+/enrollments/?$"
         plugins:
           - name: jwt

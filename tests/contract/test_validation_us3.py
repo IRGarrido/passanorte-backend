@@ -6,11 +6,15 @@ GET /visits/{spot_id}, idempotência por par (user, spot) — RF31–RF33.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import pytest
 from fastapi.testclient import TestClient
 
+from services.gamification.app.core.rewards import get_reward_gateway
 from services.validation.app.core import deps as validation_deps  # noqa: E402
 from services.validation.app.main import create_test_app as validation_factory  # noqa: E402
+from shared.rewards import RewardReceipt
 from shared.security import create_access_token  # noqa: E402
 
 SPOT = {
@@ -27,6 +31,9 @@ SPOT = {
 @pytest.fixture
 def client(db_session):
     app = validation_factory()
+    app.dependency_overrides[get_reward_gateway] = lambda: lambda *_: RewardReceipt(
+        confirmed=True, balance=1, checked_at=datetime.now(UTC),
+    )
     app.dependency_overrides[validation_deps.get_db] = lambda: db_session
     # snapshot do catalog fixo (serviço externo simulado, D-05)
     app.dependency_overrides[validation_deps.get_catalog_snapshot] = lambda: (lambda spot_id: dict(SPOT, id=spot_id))
@@ -42,7 +49,7 @@ def test_post_visit_within_radius_is_validated(client, db_session):
     resp = client.post(
         "/api/v1/visits",
         headers=tourist_headers(),
-        json={"tourist_spot_id": SPOT["id"], "latitude": -3.4704, "longitude": -60.0235},
+        json={"tourist_spot_id": SPOT["id"], "accuracy_m": 5, "latitude": -3.4704, "longitude": -60.0235},
     )
     assert resp.status_code == 201, resp.text
     body = resp.json()
@@ -54,7 +61,7 @@ def test_post_visit_outside_radius_is_rejected(client, db_session):
     resp = client.post(
         "/api/v1/visits",
         headers=tourist_headers(),
-        json={"tourist_spot_id": SPOT["id"], "latitude": -3.4704, "longitude": -60.0100},
+        json={"tourist_spot_id": SPOT["id"], "accuracy_m": 5, "latitude": -3.4704, "longitude": -60.0100},
     )
     assert resp.status_code == 422, resp.text
     body = resp.json()
@@ -83,13 +90,13 @@ def test_post_visit_unknown_spot_is_404(client):
     resp = client.post(
         "/api/v1/visits",
         headers=tourist_headers(),
-        json={"tourist_spot_id": "999", "latitude": -3.4704, "longitude": -60.0238},
+        json={"tourist_spot_id": "999", "accuracy_m": 5, "latitude": -3.4704, "longitude": -60.0238},
     )
     assert resp.status_code == 404
 
 
 def test_post_visit_is_idempotent(client, db_session):
-    payload = {"tourist_spot_id": SPOT["id"], "latitude": -3.4704, "longitude": -60.0238}
+    payload = {"tourist_spot_id": SPOT["id"], "accuracy_m": 5, "latitude": -3.4704, "longitude": -60.0238}
     first = client.post("/api/v1/visits", headers=tourist_headers(), json=payload)
     assert first.status_code == 201
     second = client.post("/api/v1/visits", headers=tourist_headers(), json=payload)
@@ -101,7 +108,7 @@ def test_get_visits_lists_validated(client):
     client.post(
         "/api/v1/visits",
         headers=tourist_headers(),
-        json={"tourist_spot_id": SPOT["id"], "latitude": -3.4704, "longitude": -60.0238},
+        json={"tourist_spot_id": SPOT["id"], "accuracy_m": 5, "latitude": -3.4704, "longitude": -60.0238},
     )
     resp = client.get("/api/v1/visits", headers=tourist_headers())
     body = resp.json()
@@ -114,7 +121,7 @@ def test_get_visit_by_spot(client):
     client.post(
         "/api/v1/visits",
         headers=tourist_headers(),
-        json={"tourist_spot_id": SPOT["id"], "latitude": -3.4704, "longitude": -60.0238},
+        json={"tourist_spot_id": SPOT["id"], "accuracy_m": 5, "latitude": -3.4704, "longitude": -60.0238},
     )
     resp = client.get(f"/api/v1/visits/{SPOT['id']}", headers=tourist_headers())
     assert resp.status_code == 200

@@ -23,6 +23,8 @@ flowchart TD
 
 [Contrato e migração da S3](docs/implementation/S3_BACKEND.md)
 
+[Contrato e validação da S4](docs/implementation/S4_BACKEND.md)
+
 ## Primeiro uso local
 
 Pré-requisitos: Docker com Compose v2 e uv. No Windows, inicie Docker Desktop em modo Linux.
